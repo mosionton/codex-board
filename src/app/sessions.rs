@@ -17,7 +17,7 @@ impl App {
         self.session_state.selected_session()
     }
 
-    pub(crate) fn move_selection(&mut self, delta: isize) {
+    pub(crate) const fn move_selection(&mut self, delta: isize) {
         self.session_state.move_selection(delta);
     }
 

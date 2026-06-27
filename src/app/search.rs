@@ -1,7 +1,7 @@
 use super::TextField;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SearchState {
+pub struct SearchState {
     query: String,
     draft: TextField,
 }
@@ -11,11 +11,11 @@ impl SearchState {
         &self.query
     }
 
-    pub(crate) fn draft(&self) -> &TextField {
+    pub(crate) const fn draft(&self) -> &TextField {
         &self.draft
     }
 
-    pub(crate) fn draft_mut(&mut self) -> &mut TextField {
+    pub(crate) const fn draft_mut(&mut self) -> &mut TextField {
         &mut self.draft
     }
 
@@ -39,7 +39,7 @@ impl SearchState {
         self.draft.clear();
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.query.is_empty()
     }
 }

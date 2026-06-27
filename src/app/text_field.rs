@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct TextField {
+pub struct TextField {
     text: String,
     cursor: usize,
 }
@@ -58,7 +58,7 @@ impl TextField {
         self.cursor = (self.cursor + 1).min(char_count(&self.text));
     }
 
-    pub(crate) fn move_cursor_home(&mut self) {
+    pub(crate) const fn move_cursor_home(&mut self) {
         self.cursor = 0;
     }
 
@@ -114,6 +114,6 @@ impl Deref for TextField {
     }
 }
 
-pub(crate) fn char_count(text: &str) -> usize {
+pub fn char_count(text: &str) -> usize {
     text.chars().count()
 }

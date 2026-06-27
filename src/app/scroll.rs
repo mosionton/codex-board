@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ScrollPosition {
+pub struct ScrollPosition {
     offset: usize,
 }
 

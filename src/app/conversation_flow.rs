@@ -27,7 +27,7 @@ impl App {
         self.clear_status();
     }
 
-    pub(crate) fn open_details(&mut self) {
+    pub(crate) const fn open_details(&mut self) {
         self.details_scroll.reset();
         self.overlay = Some(Overlay::Details);
     }

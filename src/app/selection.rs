@@ -3,7 +3,7 @@ use ratatui::widgets::TableState;
 use super::cycle_index;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct TableSelection {
+pub struct TableSelection {
     index: usize,
     state: TableState,
 }
@@ -13,21 +13,21 @@ impl TableSelection {
         self.index
     }
 
-    pub(crate) fn state_mut(&mut self) -> &mut TableState {
+    pub(crate) const fn state_mut(&mut self) -> &mut TableState {
         &mut self.state
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub(crate) const fn reset(&mut self) {
         self.index = 0;
         self.state.select(Some(0));
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub(crate) const fn clear(&mut self) {
         self.index = 0;
         self.state.select(None);
     }
 
-    pub(crate) fn select(&mut self, index: usize) {
+    pub(crate) const fn select(&mut self, index: usize) {
         self.index = index;
         self.state.select(Some(index));
     }
@@ -40,7 +40,7 @@ impl TableSelection {
         }
     }
 
-    pub(crate) fn move_by(&mut self, len: usize, delta: isize) {
+    pub(crate) const fn move_by(&mut self, len: usize, delta: isize) {
         if len == 0 {
             return;
         }
@@ -64,7 +64,7 @@ impl TableSelection {
     }
 
     #[cfg(test)]
-    pub(crate) fn state(&self) -> &TableState {
+    pub(crate) const fn state(&self) -> &TableState {
         &self.state
     }
 }

@@ -6,7 +6,7 @@ use crate::provider_config::{ProviderConfig, ProviderRegistry};
 
 use super::{ProviderEditor, TableSelection, model_fetch::ModelFetchTask};
 
-pub(crate) struct ProvidersState {
+pub struct ProvidersState {
     pub(super) registry: ProviderRegistry,
     pub(super) applied_provider_id: Option<String>,
     pub(super) config_path: PathBuf,
@@ -57,15 +57,15 @@ impl ProvidersState {
         self.applied_provider_id.as_deref() == Some(id)
     }
 
-    pub(crate) fn selection_state_mut(&mut self) -> &mut TableState {
+    pub(crate) const fn selection_state_mut(&mut self) -> &mut TableState {
         self.selection.state_mut()
     }
 
-    pub(crate) fn editor(&self) -> Option<&ProviderEditor> {
+    pub(crate) const fn editor(&self) -> Option<&ProviderEditor> {
         self.editor.as_ref()
     }
 
-    pub(crate) fn editor_mut(&mut self) -> Option<&mut ProviderEditor> {
+    pub(crate) const fn editor_mut(&mut self) -> Option<&mut ProviderEditor> {
         self.editor.as_mut()
     }
 

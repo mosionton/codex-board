@@ -133,7 +133,7 @@ impl ProviderEditor {
         }
     }
 
-    pub fn active_text_mut(&mut self) -> Option<&mut TextField> {
+    pub const fn active_text_mut(&mut self) -> Option<&mut TextField> {
         match self.active_field {
             ProviderField::Id => Some(&mut self.id),
             ProviderField::Model => Some(&mut self.model),

@@ -3,7 +3,7 @@ use crate::session_store::ConversationEntry;
 use super::{ConversationRoleFilter, ScrollPosition, SearchState};
 
 #[derive(Debug, Clone)]
-pub(crate) struct ConversationState {
+pub struct ConversationState {
     messages: Vec<ConversationEntry>,
     scroll: ScrollPosition,
     search: SearchState,
@@ -27,19 +27,19 @@ impl ConversationState {
         self.scroll.reset();
     }
 
-    pub(crate) fn scroll(&self) -> ScrollPosition {
+    pub(crate) const fn scroll(&self) -> ScrollPosition {
         self.scroll
     }
 
-    pub(crate) fn scroll_mut(&mut self) -> &mut ScrollPosition {
+    pub(crate) const fn scroll_mut(&mut self) -> &mut ScrollPosition {
         &mut self.scroll
     }
 
-    pub(crate) fn search(&self) -> &SearchState {
+    pub(crate) const fn search(&self) -> &SearchState {
         &self.search
     }
 
-    pub(crate) fn search_mut(&mut self) -> &mut SearchState {
+    pub(crate) const fn search_mut(&mut self) -> &mut SearchState {
         &mut self.search
     }
 
@@ -48,7 +48,7 @@ impl ConversationState {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_role_filter(&mut self, role_filter: ConversationRoleFilter) {
+    pub(crate) const fn set_role_filter(&mut self, role_filter: ConversationRoleFilter) {
         self.role_filter = role_filter;
     }
 
@@ -62,7 +62,7 @@ impl ConversationState {
         self.scroll.reset();
     }
 
-    pub(crate) fn cycle_role_filter(&mut self) {
+    pub(crate) const fn cycle_role_filter(&mut self) {
         self.role_filter = self.role_filter.next();
         self.scroll.reset();
     }

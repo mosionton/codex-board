@@ -1,7 +1,6 @@
 name: CI
 
 on:
-  push:
   pull_request:
 
 permissions:
@@ -19,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust
-        run: rustup toolchain install stable --profile minimal --component clippy rustfmt
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
 
       - name: Use Rust stable
         run: rustup default stable

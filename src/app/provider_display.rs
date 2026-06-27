@@ -2,7 +2,7 @@ use std::env;
 
 use crate::provider_config::ProviderConfig;
 
-pub(crate) fn provider_api_key_display(provider: &ProviderConfig) -> String {
+pub fn provider_api_key_display(provider: &ProviderConfig) -> String {
     if provider.auth_mode.requires_openai_auth() {
         return "-".to_string();
     }
@@ -28,7 +28,7 @@ pub(crate) fn provider_api_key_display(provider: &ProviderConfig) -> String {
 }
 
 #[must_use]
-pub(crate) const fn provider_auth_mode_display(provider: &ProviderConfig) -> &'static str {
+pub const fn provider_auth_mode_display(provider: &ProviderConfig) -> &'static str {
     provider.auth_mode.as_str()
 }
 

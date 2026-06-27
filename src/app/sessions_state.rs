@@ -6,7 +6,7 @@ use crate::session_store::{Session, matches_search, search_terms};
 
 use super::{ProviderTabs, Scope, SearchState, TableSelection};
 
-pub(crate) struct SessionsState {
+pub struct SessionsState {
     pub(super) items: Vec<Session>,
     pub(super) provider_tabs: ProviderTabs,
     pub(super) selection: TableSelection,
@@ -48,11 +48,11 @@ impl SessionsState {
         self.scope
     }
 
-    pub(crate) fn provider_tabs(&self) -> &ProviderTabs {
+    pub(crate) const fn provider_tabs(&self) -> &ProviderTabs {
         &self.provider_tabs
     }
 
-    pub(crate) fn move_provider_tab(&mut self, delta: isize) {
+    pub(crate) const fn move_provider_tab(&mut self, delta: isize) {
         self.provider_tabs.move_by(delta);
     }
 
@@ -60,15 +60,15 @@ impl SessionsState {
         self.provider_tabs.selected_label_owned()
     }
 
-    pub(crate) fn search(&self) -> &SearchState {
+    pub(crate) const fn search(&self) -> &SearchState {
         &self.search
     }
 
-    pub(crate) fn search_mut(&mut self) -> &mut SearchState {
+    pub(crate) const fn search_mut(&mut self) -> &mut SearchState {
         &mut self.search
     }
 
-    pub(crate) fn visible_len(&self) -> usize {
+    pub(crate) const fn visible_len(&self) -> usize {
         self.visible_indices.len()
     }
 
@@ -131,7 +131,7 @@ impl SessionsState {
         }
     }
 
-    pub(crate) fn move_selection(&mut self, delta: isize) {
+    pub(crate) const fn move_selection(&mut self, delta: isize) {
         self.selection.move_by(self.visible_indices.len(), delta);
     }
 
@@ -159,16 +159,16 @@ impl SessionsState {
         self.selection.index()
     }
 
-    pub(crate) fn reset_selection(&mut self) {
+    pub(crate) const fn reset_selection(&mut self) {
         self.selection.reset();
     }
 
     #[cfg(test)]
-    pub(crate) fn select_index(&mut self, index: usize) {
+    pub(crate) const fn select_index(&mut self, index: usize) {
         self.selection.select(index);
     }
 
-    pub(crate) fn selection_state_mut(&mut self) -> &mut TableState {
+    pub(crate) const fn selection_state_mut(&mut self) -> &mut TableState {
         self.selection.state_mut()
     }
 }

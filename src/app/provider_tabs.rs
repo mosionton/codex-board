@@ -7,7 +7,7 @@ use super::{Scope, cycle_index};
 const ALL_PROVIDERS_LABEL: &str = "All";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProviderTabs {
+pub struct ProviderTabs {
     labels: Vec<String>,
     selected_index: usize,
 }
@@ -63,7 +63,7 @@ impl ProviderTabs {
             .filter(|label| *label != ALL_PROVIDERS_LABEL)
     }
 
-    pub(crate) fn move_by(&mut self, delta: isize) {
+    pub(crate) const fn move_by(&mut self, delta: isize) {
         if self.labels.is_empty() {
             return;
         }
@@ -71,11 +71,11 @@ impl ProviderTabs {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_selected_index(&mut self, index: usize) {
+    pub(crate) const fn set_selected_index(&mut self, index: usize) {
         self.selected_index = index;
     }
 
-    fn sync_selection(&mut self) {
+    const fn sync_selection(&mut self) {
         if self.selected_index >= self.labels.len() {
             self.selected_index = 0;
         }

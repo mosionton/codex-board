@@ -1,6 +1,6 @@
 [package]
 name = "codex-board"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 authors = ["mosionton"]
 description = "Terminal UI for browsing Codex sessions, managing model providers, and resuming prior work."

@@ -193,6 +193,11 @@ mod tests {
             timestamp: "2026-06-23T00:00:00Z".into(),
             summary: "test session".into(),
             file: PathBuf::from("session-1.jsonl"),
+            thread_source: "user".into(),
+            parent_thread_id: None,
+            agent_nickname: None,
+            agent_role: None,
+            agent_depth: None,
         }
     }
 
@@ -246,6 +251,11 @@ mod tests {
                 timestamp: "2".into(),
                 summary: "first".into(),
                 file: PathBuf::from("1"),
+                thread_source: "user".into(),
+                parent_thread_id: None,
+                agent_nickname: None,
+                agent_role: None,
+                agent_depth: None,
             },
             Session {
                 id: "2".into(),
@@ -255,6 +265,11 @@ mod tests {
                 timestamp: "1".into(),
                 summary: "second".into(),
                 file: PathBuf::from("2"),
+                thread_source: "user".into(),
+                parent_thread_id: None,
+                agent_nickname: None,
+                agent_role: None,
+                agent_depth: None,
             },
         ];
 

@@ -555,6 +555,11 @@ mod tests {
             timestamp: "2026-06-24T00:00:00Z".to_string(),
             summary: summary.to_string(),
             file: PathBuf::from(format!("{id}.jsonl")),
+            thread_source: "user".to_string(),
+            parent_thread_id: None,
+            agent_nickname: None,
+            agent_role: None,
+            agent_depth: None,
         }
     }
 }

@@ -19,6 +19,11 @@ pub(super) struct Session {
     pub(super) timestamp: String,
     pub(super) summary: String,
     pub(super) file: PathBuf,
+    pub(super) thread_source: String,
+    pub(super) parent_thread_id: Option<String>,
+    pub(super) agent_nickname: Option<String>,
+    pub(super) agent_role: Option<String>,
+    pub(super) agent_depth: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +68,11 @@ fn parse_session_file(path: &Path) -> Result<Option<Session>> {
     let mut timestamp = None;
     let mut model = None;
     let mut summary = None;
+    let mut thread_source = None;
+    let mut parent_thread_id = None;
+    let mut agent_nickname = None;
+    let mut agent_role = None;
+    let mut agent_depth = None;
 
     for line in reader.lines().take(160) {
         let line =
@@ -77,6 +87,7 @@ fn parse_session_file(path: &Path) -> Result<Option<Session>> {
 
         match json.get("type").and_then(JsonValue::as_str) {
             Some("session_meta") => {
+                let spawn = subagent_spawn(payload);
                 id = payload
                     .get("id")
                     .or_else(|| payload.get("session_id"))
@@ -95,6 +106,26 @@ fn parse_session_file(path: &Path) -> Result<Option<Session>> {
                     .and_then(JsonValue::as_str)
                     .or_else(|| json.get("timestamp").and_then(JsonValue::as_str))
                     .map(str::to_string);
+                thread_source = payload
+                    .get("thread_source")
+                    .and_then(JsonValue::as_str)
+                    .map(str::to_string);
+                parent_thread_id = optional_string_from(
+                    payload.get("parent_thread_id"),
+                    spawn.and_then(|spawn| spawn.get("parent_thread_id")),
+                );
+                agent_nickname = optional_string_from(
+                    payload.get("agent_nickname"),
+                    spawn.and_then(|spawn| spawn.get("agent_nickname")),
+                );
+                agent_role = optional_string_from(
+                    payload.get("agent_role"),
+                    spawn.and_then(|spawn| spawn.get("agent_role")),
+                );
+                agent_depth = spawn
+                    .and_then(|spawn| spawn.get("depth"))
+                    .and_then(JsonValue::as_u64)
+                    .and_then(|depth| u32::try_from(depth).ok());
             }
             Some("turn_context") if model.is_none() => {
                 model = payload
@@ -139,7 +170,26 @@ fn parse_session_file(path: &Path) -> Result<Option<Session>> {
         timestamp: timestamp.unwrap_or_default(),
         summary,
         file: path.to_path_buf(),
+        thread_source: thread_source.unwrap_or_else(|| "user".to_string()),
+        parent_thread_id,
+        agent_nickname,
+        agent_role,
+        agent_depth,
     }))
+}
+
+fn subagent_spawn(payload: &JsonValue) -> Option<&JsonValue> {
+    payload.get("source")?.get("subagent")?.get("thread_spawn")
+}
+
+fn optional_string_from(
+    primary: Option<&JsonValue>,
+    fallback: Option<&JsonValue>,
+) -> Option<String> {
+    primary
+        .and_then(JsonValue::as_str)
+        .or_else(|| fallback.and_then(JsonValue::as_str))
+        .map(str::to_string)
 }
 
 pub(super) fn load_session_conversation(path: &Path) -> Result<Vec<ConversationEntry>> {
@@ -195,6 +245,10 @@ fn session_search_text(session: &Session) -> String {
         session.cwd.to_str().unwrap_or_default(),
         session.summary.as_str(),
         session.timestamp.as_str(),
+        session.thread_source.as_str(),
+        session.parent_thread_id.as_deref().unwrap_or_default(),
+        session.agent_nickname.as_deref().unwrap_or_default(),
+        session.agent_role.as_deref().unwrap_or_default(),
     ]
     .join(" ")
     .to_lowercase()
@@ -371,6 +425,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_subagent_metadata_from_session_meta() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            r#"{"timestamp":"2026-06-29T11:34:49Z","type":"session_meta","payload":{"id":"child","session_id":"parent","parent_thread_id":"parent","timestamp":"2026-06-29T11:34:49Z","cwd":"/tmp/project","model_provider":"switcher","thread_source":"subagent","agent_nickname":"Boole","agent_role":"worker","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent","depth":1,"agent_nickname":"Boole","agent_role":"worker"}}}}}"#
+                .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        let session = parse_session_file(&path).unwrap().unwrap();
+
+        assert_eq!(session.id, "child");
+        assert_eq!(session.thread_source, "subagent");
+        assert_eq!(session.parent_thread_id.as_deref(), Some("parent"));
+        assert_eq!(session.agent_nickname.as_deref(), Some("Boole"));
+        assert_eq!(session.agent_role.as_deref(), Some("worker"));
+        assert_eq!(session.agent_depth, Some(1));
+    }
+
+    #[test]
     fn loads_user_and_assistant_conversation_entries() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("session.jsonl");
@@ -415,12 +491,38 @@ mod tests {
             timestamp: "2026-06-23T00:00:00Z".into(),
             summary: "实现 TUI 摘要展示".into(),
             file: PathBuf::from("1"),
+            thread_source: "user".into(),
+            parent_thread_id: None,
+            agent_nickname: None,
+            agent_role: None,
+            agent_depth: None,
         };
 
         assert!(matches_search(&session, &search_terms("switcher 摘要")));
         assert!(matches_search(&session, &search_terms("current tui")));
         assert!(!matches_search(&session, &search_terms("switcher missing")));
         assert!(matches_search(&session, &search_terms("   ")));
+    }
+
+    #[test]
+    fn search_matches_session_relationship_metadata() {
+        let session = Session {
+            id: "abc-123".into(),
+            cwd: PathBuf::from("/repo/current"),
+            provider: "switcher".into(),
+            model: None,
+            timestamp: "2026-06-23T00:00:00Z".into(),
+            summary: "实现 TUI 摘要展示".into(),
+            file: PathBuf::from("1"),
+            thread_source: "subagent".into(),
+            parent_thread_id: Some("parent-123".into()),
+            agent_nickname: Some("Boole".into()),
+            agent_role: Some("worker".into()),
+            agent_depth: Some(1),
+        };
+
+        assert!(matches_search(&session, &search_terms("parent-123 boole")));
+        assert!(matches_search(&session, &search_terms("subagent worker")));
     }
 
     #[test]

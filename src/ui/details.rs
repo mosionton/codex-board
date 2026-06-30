@@ -57,6 +57,34 @@ pub(super) fn selected_session_details(app: &App, width: usize) -> Vec<Line<'sta
         [
             ("time", session.timestamp.clone()),
             ("provider", session.provider.clone()),
+            ("source", session.thread_source.clone()),
+            (
+                "parent",
+                session
+                    .parent_thread_id
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            ),
+            (
+                "agent",
+                session
+                    .agent_nickname
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            ),
+            (
+                "role",
+                session
+                    .agent_role
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            ),
+            (
+                "depth",
+                session
+                    .agent_depth
+                    .map_or_else(|| "-".to_string(), |depth| depth.to_string()),
+            ),
             ("cwd", session.cwd.display().to_string()),
             ("summary", session.summary.clone()),
             ("session_id", session.id.clone()),

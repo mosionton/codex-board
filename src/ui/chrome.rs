@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use crate::app::{App, Page, Scope};
+use crate::app::{App, Page, Scope, SessionViewMode};
 
 use super::layout::centered_rect;
 
@@ -57,7 +57,11 @@ pub(super) fn draw_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect)
         Scope::CurrentDir => "current directory",
         Scope::All => "all sessions",
     };
-    let title = format!("Sessions - {scope}");
+    let view = match app.session_state.view_mode() {
+        SessionViewMode::Tree => "tree",
+        SessionViewMode::Flat => "flat",
+    };
+    let title = format!("Sessions - {scope} - {view}");
 
     frame.render_widget(
         Paragraph::new(Line::from(line)).block(Block::default().title(title).borders(Borders::ALL)),
@@ -90,7 +94,7 @@ pub(super) fn draw_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect)
     let status = if app.status.is_empty() {
         match app.page {
             Page::Sessions => {
-                "Enter resume | i details | c conversation | r reload | t toggle pages | Tab provider | a scope | / search | q quit"
+                "Enter resume | i details | c conversation | r reload | v view | t toggle pages | Tab provider | a scope | / search | q quit"
             }
             Page::Providers => {
                 "a apply | i details | t toggle pages | n new | e edit | d delete | q quit"

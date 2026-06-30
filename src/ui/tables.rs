@@ -4,7 +4,10 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table},
 };
 
-use crate::{app::App, session_store::truncate_chars};
+use crate::{
+    app::App,
+    session_store::{Session, truncate_chars},
+};
 
 use super::{details::provider_display_items, layout::centered_rect, layout::compact_path};
 
@@ -36,10 +39,12 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
     let rows = (0..app.session_state.visible_len())
         .filter_map(|index| {
             let session = app.session_state.visible_session(index)?;
+            let depth = app.session_state.visible_depth(index);
             let provider_style = Style::default().fg(Color::Cyan);
             Some(Row::new([
                 Cell::from(session.timestamp.as_str().to_string()),
                 Cell::from(session.provider.clone()).style(provider_style),
+                Cell::from(truncate_chars(&session_source_label(session, depth), 24)),
                 Cell::from(compact_path(&session.cwd)),
                 Cell::from(truncate_chars(&session.summary, 96)),
             ]))
@@ -51,12 +56,13 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
         [
             Constraint::Length(25),
             Constraint::Length(18),
-            Constraint::Length(36),
+            Constraint::Length(24),
+            Constraint::Length(32),
             Constraint::Min(24),
         ],
     )
     .header(
-        Row::new(["time", "provider", "cwd", "summary"]).style(
+        Row::new(["time", "provider", "source", "cwd", "summary"]).style(
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -70,6 +76,40 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
     .block(Block::default().borders(Borders::ALL));
 
     frame.render_stateful_widget(table, area, app.session_state.selection_state_mut());
+}
+
+fn session_source_label(session: &Session, depth: usize) -> String {
+    let indent = "  ".repeat(depth);
+    let is_subagent = session.thread_source == "subagent" || session.parent_thread_id.is_some();
+    if !is_subagent {
+        return format!("{indent}{}", session.thread_source);
+    }
+
+    let mut label = session
+        .agent_nickname
+        .as_deref()
+        .filter(|nickname| !nickname.trim().is_empty())
+        .map_or_else(|| "subagent".to_string(), |nickname| format!("sub {nickname}"));
+    if let Some(role) = session
+        .agent_role
+        .as_deref()
+        .filter(|role| !role.trim().is_empty())
+    {
+        label.push('/');
+        label.push_str(role);
+    }
+    if depth == 0
+        && let Some(parent) = session.parent_thread_id.as_deref()
+    {
+        label.push_str(" <- ");
+        label.push_str(&short_session_id(parent));
+    }
+
+    format!("{indent}{label}")
+}
+
+fn short_session_id(session_id: &str) -> String {
+    session_id.chars().take(8).collect()
 }
 
 pub(super) fn draw_providers(frame: &mut ratatui::Frame<'_>, app: &mut App, area: Rect) {

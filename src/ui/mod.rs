@@ -341,12 +341,18 @@ mod tests {
             "No provider selected."
         );
 
-        let sessions = vec![test_session(
+        let mut session = test_session(
             "session-1",
             current_dir.clone(),
             "switcher",
             "summary text",
-        )];
+        );
+        session.thread_source = "subagent".to_string();
+        session.parent_thread_id = Some("parent-1".to_string());
+        session.agent_nickname = Some("Boole".to_string());
+        session.agent_role = Some("worker".to_string());
+        session.agent_depth = Some(1);
+        let sessions = vec![session];
         let mut registry = ProviderRegistry::default();
         registry
             .upsert(
@@ -364,6 +370,21 @@ mod tests {
                 .iter()
                 .any(|line| line_text(line).contains("session-1"))
         );
+        let session_detail_text = session_lines
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(session_detail_text.contains("source"));
+        assert!(session_detail_text.contains("subagent"));
+        assert!(session_detail_text.contains("parent"));
+        assert!(session_detail_text.contains("parent-1"));
+        assert!(session_detail_text.contains("agent"));
+        assert!(session_detail_text.contains("Boole"));
+        assert!(session_detail_text.contains("role"));
+        assert!(session_detail_text.contains("worker"));
+        assert!(session_detail_text.contains("depth"));
+        assert!(session_detail_text.contains("1"));
         assert!(
             provider_lines
                 .iter()

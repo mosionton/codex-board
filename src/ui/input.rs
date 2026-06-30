@@ -69,7 +69,10 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::{
-        app::{ConfirmationAction, ConversationRoleFilter, Overlay, ProviderEditor, ProviderField},
+        app::{
+            ConfirmationAction, ConversationRoleFilter, Overlay, ProviderEditor, ProviderField,
+            SessionViewMode,
+        },
         provider_config::{ProviderConfig, ProviderRegistry},
         session_store::Session,
     };
@@ -160,6 +163,20 @@ mod tests {
 
         assert!(action.is_none());
         assert_eq!(app.page, Page::Sessions);
+    }
+
+    #[test]
+    fn v_key_toggles_session_view_mode() {
+        let mut app = app_with_registry(ProviderRegistry::default());
+        assert_eq!(app.session_state.view_mode(), SessionViewMode::Tree);
+
+        let action = handle_sessions_page_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+        );
+
+        assert!(action.is_none());
+        assert_eq!(app.session_state.view_mode(), SessionViewMode::Flat);
     }
 
     #[test]

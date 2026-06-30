@@ -34,7 +34,7 @@ pub(crate) use runtime::run;
 pub(crate) use scroll::ScrollPosition;
 pub(crate) use search::SearchState;
 pub(crate) use selection::TableSelection;
-pub(crate) use sessions_state::SessionsState;
+pub(crate) use sessions_state::{SessionViewMode, SessionsState};
 pub(crate) use text_field::{TextField, char_count};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

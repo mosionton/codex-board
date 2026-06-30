@@ -72,6 +72,12 @@ impl App {
         self.session_state.toggle_scope();
     }
 
+    pub(crate) fn toggle_session_view_mode(&mut self) {
+        self.session_state.toggle_view_mode();
+        self.session_state.reset_selection();
+        self.refresh_visible();
+    }
+
     pub(crate) fn clear_session_search(&mut self) {
         self.session_state.clear_search();
         self.clear_status();

@@ -21,6 +21,7 @@ pub struct SessionsState {
     pub(super) selection: TableSelection,
     pub(super) visible_indices: Vec<usize>,
     pub(super) visible_depths: Vec<usize>,
+    pub(super) visible_tree_prefixes: Vec<String>,
     pub(super) view_mode: SessionViewMode,
     pub(super) search: SearchState,
     pub(super) scope: Scope,
@@ -37,6 +38,7 @@ impl SessionsState {
             selection: TableSelection::default(),
             visible_indices: Vec::new(),
             visible_depths: Vec::new(),
+            visible_tree_prefixes: Vec::new(),
             view_mode: SessionViewMode::Tree,
             search: SearchState::default(),
             scope: Scope::CurrentDir,
@@ -103,6 +105,12 @@ impl SessionsState {
             .unwrap_or_default()
     }
 
+    pub(crate) fn visible_tree_prefix(&self, visible_index: usize) -> &str {
+        self.visible_tree_prefixes
+            .get(visible_index)
+            .map_or("", String::as_str)
+    }
+
     pub(crate) fn visible_session(&self, visible_index: usize) -> Option<&Session> {
         self.visible_indices
             .get(visible_index)
@@ -145,6 +153,7 @@ impl SessionsState {
 
     fn rebuild_flat_visible(&mut self, candidates: Vec<usize>) {
         self.visible_depths = vec![0; candidates.len()];
+        self.visible_tree_prefixes = vec![String::new(); candidates.len()];
         self.visible_indices = candidates;
     }
 
@@ -181,15 +190,19 @@ impl SessionsState {
 
         self.visible_indices.clear();
         self.visible_depths.clear();
+        self.visible_tree_prefixes.clear();
         let mut visited = HashSet::new();
         for root in roots {
             append_tree_row(
                 root,
                 0,
+                "● ".to_string(),
+                String::new(),
                 &children,
                 &mut visited,
                 &mut self.visible_indices,
                 &mut self.visible_depths,
+                &mut self.visible_tree_prefixes,
             );
         }
 
@@ -202,10 +215,13 @@ impl SessionsState {
             append_tree_row(
                 index,
                 0,
+                "● ".to_string(),
+                String::new(),
                 &children,
                 &mut visited,
                 &mut self.visible_indices,
                 &mut self.visible_depths,
+                &mut self.visible_tree_prefixes,
             );
         }
     }
@@ -289,26 +305,36 @@ fn sort_session_indices(items: &[Session], indices: &mut [usize]) {
 fn append_tree_row(
     index: usize,
     depth: usize,
+    tree_prefix: String,
+    child_prefix_base: String,
     children: &HashMap<usize, Vec<usize>>,
     visited: &mut HashSet<usize>,
     visible_indices: &mut Vec<usize>,
     visible_depths: &mut Vec<usize>,
+    visible_tree_prefixes: &mut Vec<String>,
 ) {
     if !visited.insert(index) {
         return;
     }
     visible_indices.push(index);
     visible_depths.push(depth);
+    visible_tree_prefixes.push(tree_prefix);
 
     if let Some(child_indices) = children.get(&index) {
-        for child_index in child_indices {
+        for (child_position, child_index) in child_indices.iter().enumerate() {
+            let is_last = child_position + 1 == child_indices.len();
+            let connector = if is_last { "└─ " } else { "├─ " };
+            let next_child_prefix_base = if is_last { "   " } else { "│  " };
             append_tree_row(
                 *child_index,
                 depth + 1,
+                format!("{child_prefix_base}{connector}"),
+                format!("{child_prefix_base}{next_child_prefix_base}"),
                 children,
                 visited,
                 visible_indices,
                 visible_depths,
+                visible_tree_prefixes,
             );
         }
     }
@@ -413,5 +439,61 @@ mod tests {
 
         assert_eq!(state.visible_session(0).unwrap().id, "child");
         assert_eq!(state.visible_depth(0), 0);
+    }
+
+    #[test]
+    fn tree_view_builds_visible_tree_prefixes() {
+        let current_dir = PathBuf::from("/repo/current");
+        let mut parent = test_session("parent", current_dir.clone(), "alpha", "parent");
+        parent.timestamp = "2026-06-24T10:00:00Z".into();
+        let mut first_child = test_session("first-child", current_dir.clone(), "alpha", "first");
+        first_child.timestamp = "2026-06-24T09:00:00Z".into();
+        first_child.thread_source = "subagent".into();
+        first_child.parent_thread_id = Some("parent".into());
+        let mut grandchild =
+            test_session("grandchild", current_dir.clone(), "alpha", "grandchild");
+        grandchild.timestamp = "2026-06-24T08:00:00Z".into();
+        grandchild.thread_source = "subagent".into();
+        grandchild.parent_thread_id = Some("first-child".into());
+        let mut last_child = test_session("last-child", current_dir.clone(), "alpha", "last");
+        last_child.timestamp = "2026-06-24T07:00:00Z".into();
+        last_child.thread_source = "subagent".into();
+        last_child.parent_thread_id = Some("parent".into());
+
+        let mut state = SessionsState::new(
+            vec![parent, first_child, grandchild, last_child],
+            current_dir,
+            PathBuf::from("sessions"),
+        );
+        state.refresh_visible();
+
+        assert_eq!(state.visible_session(0).unwrap().id, "parent");
+        assert_eq!(state.visible_tree_prefix(0), "● ");
+        assert_eq!(state.visible_session(1).unwrap().id, "first-child");
+        assert_eq!(state.visible_tree_prefix(1), "├─ ");
+        assert_eq!(state.visible_session(2).unwrap().id, "grandchild");
+        assert_eq!(state.visible_tree_prefix(2), "│  └─ ");
+        assert_eq!(state.visible_session(3).unwrap().id, "last-child");
+        assert_eq!(state.visible_tree_prefix(3), "└─ ");
+    }
+
+    #[test]
+    fn flat_view_has_empty_tree_prefixes() {
+        let current_dir = PathBuf::from("/repo/current");
+        let mut parent = test_session("parent", current_dir.clone(), "alpha", "parent");
+        parent.timestamp = "2026-06-24T10:00:00Z".into();
+        let mut child = test_session("child", current_dir.clone(), "alpha", "child");
+        child.timestamp = "2026-06-24T09:00:00Z".into();
+        child.thread_source = "subagent".into();
+        child.parent_thread_id = Some("parent".into());
+
+        let mut state =
+            SessionsState::new(vec![parent, child], current_dir, PathBuf::from("sessions"));
+        state.toggle_view_mode();
+        state.refresh_visible();
+
+        assert_eq!(state.view_mode(), SessionViewMode::Flat);
+        assert_eq!(state.visible_tree_prefix(0), "");
+        assert_eq!(state.visible_tree_prefix(1), "");
     }
 }

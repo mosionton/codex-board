@@ -89,7 +89,10 @@ fn session_source_label(session: &Session, depth: usize) -> String {
         .agent_nickname
         .as_deref()
         .filter(|nickname| !nickname.trim().is_empty())
-        .map_or_else(|| "subagent".to_string(), |nickname| format!("sub {nickname}"));
+        .map_or_else(
+            || "subagent".to_string(),
+            |nickname| format!("sub {nickname}"),
+        );
     if let Some(role) = session
         .agent_role
         .as_deref()

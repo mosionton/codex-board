@@ -341,12 +341,8 @@ mod tests {
             "No provider selected."
         );
 
-        let mut session = test_session(
-            "session-1",
-            current_dir.clone(),
-            "switcher",
-            "summary text",
-        );
+        let mut session =
+            test_session("session-1", current_dir.clone(), "switcher", "summary text");
         session.thread_source = "subagent".to_string();
         session.parent_thread_id = Some("parent-1".to_string());
         session.agent_nickname = Some("Boole".to_string());

@@ -79,16 +79,18 @@ codex resume <session_id>
 
 ## 功能
 
-### 会话按 provider 展示
+### 会话按 provider 和关系展示
 
-Sessions 页面显示当前目录或全部本地会话。表格包含时间、provider、工作目录和摘要。
+Sessions 页面显示当前目录或全部本地会话。默认按父子关系树形展示会话；subagent 会话会
+缩进显示在派发它的父会话下。表格包含时间、provider、来源、工作目录和摘要。
 
 支持：
 
 - 当前目录和全部会话范围切换。
 - 按 provider 过滤会话。
-- 搜索会话 id、provider、工作目录、摘要和时间。
-- 查看会话详情。
+- 在树形和平铺视图之间切换。
+- 搜索会话 id、provider、工作目录、摘要、时间和 subagent 关系信息。
+- 查看会话详情，包括 parent、agent、role 和 depth。
 - 打开会话对话。
 - 从会话原目录恢复。
 
@@ -131,6 +133,7 @@ Conversation 窗口用于恢复前检查会话内容。
 | `c` | 打开对话，或清除搜索 |
 | `i` | 查看详情 |
 | `r` | 重新加载 |
+| `v` | 切换树形/平铺视图 |
 | `Enter` | 恢复会话 |
 | `t` | 切到 Providers |
 | `q` / `Esc` | 退出，或清除搜索 |

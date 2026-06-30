@@ -369,11 +369,8 @@ mod tests {
         child.parent_thread_id = Some("parent".into());
         child.agent_nickname = Some("Boole".into());
 
-        let mut state = SessionsState::new(
-            vec![child, parent],
-            current_dir,
-            PathBuf::from("sessions"),
-        );
+        let mut state =
+            SessionsState::new(vec![child, parent], current_dir, PathBuf::from("sessions"));
         state.refresh_visible();
 
         assert_eq!(state.view_mode(), SessionViewMode::Tree);
@@ -393,11 +390,8 @@ mod tests {
         child.thread_source = "subagent".into();
         child.parent_thread_id = Some("parent".into());
 
-        let mut state = SessionsState::new(
-            vec![child, parent],
-            current_dir,
-            PathBuf::from("sessions"),
-        );
+        let mut state =
+            SessionsState::new(vec![child, parent], current_dir, PathBuf::from("sessions"));
         state.toggle_view_mode();
         state.refresh_visible();
 

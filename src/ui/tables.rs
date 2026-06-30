@@ -5,7 +5,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::App,
+    app::{App, SessionViewMode},
     session_store::{Session, truncate_chars},
 };
 
@@ -39,12 +39,16 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
     let rows = (0..app.session_state.visible_len())
         .filter_map(|index| {
             let session = app.session_state.visible_session(index)?;
-            let depth = app.session_state.visible_depth(index);
+            let source = session_source_label(
+                session,
+                app.session_state.view_mode(),
+                app.session_state.visible_tree_prefix(index),
+            );
             let provider_style = Style::default().fg(Color::Cyan);
             Some(Row::new([
                 Cell::from(session.timestamp.as_str().to_string()),
                 Cell::from(session.provider.clone()).style(provider_style),
-                Cell::from(truncate_chars(&session_source_label(session, depth), 24)),
+                Cell::from(truncate_chars(&source, 24)),
                 Cell::from(compact_path(&session.cwd)),
                 Cell::from(truncate_chars(&session.summary, 96)),
             ]))
@@ -78,13 +82,31 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
     frame.render_stateful_widget(table, area, app.session_state.selection_state_mut());
 }
 
-fn session_source_label(session: &Session, depth: usize) -> String {
-    let indent = "  ".repeat(depth);
+fn session_source_label(
+    session: &Session,
+    view_mode: SessionViewMode,
+    tree_prefix: &str,
+) -> String {
     let is_subagent = session.thread_source == "subagent" || session.parent_thread_id.is_some();
-    if !is_subagent {
-        return format!("{indent}{}", session.thread_source);
+    let mut label = if is_subagent {
+        subagent_source_label(session)
+    } else {
+        session.thread_source.clone()
+    };
+    if is_orphan_root(session, view_mode, tree_prefix)
+        && let Some(parent) = session.parent_thread_id.as_deref()
+    {
+        label.push_str(" <- ");
+        label.push_str(&short_session_id(parent));
     }
 
+    match view_mode {
+        SessionViewMode::Tree => format!("{tree_prefix}{label}"),
+        SessionViewMode::Flat => label,
+    }
+}
+
+fn subagent_source_label(session: &Session) -> String {
     let mut label = session
         .agent_nickname
         .as_deref()
@@ -101,14 +123,11 @@ fn session_source_label(session: &Session, depth: usize) -> String {
         label.push('/');
         label.push_str(role);
     }
-    if depth == 0
-        && let Some(parent) = session.parent_thread_id.as_deref()
-    {
-        label.push_str(" <- ");
-        label.push_str(&short_session_id(parent));
-    }
+    label
+}
 
-    format!("{indent}{label}")
+fn is_orphan_root(session: &Session, view_mode: SessionViewMode, tree_prefix: &str) -> bool {
+    view_mode == SessionViewMode::Tree && tree_prefix == "● " && session.parent_thread_id.is_some()
 }
 
 fn short_session_id(session_id: &str) -> String {
@@ -164,6 +183,65 @@ pub(super) fn draw_providers(frame: &mut ratatui::Frame<'_>, app: &mut App, area
             Paragraph::new("No providers configured. Press n to add one.")
                 .block(Block::default().title("Providers").borders(Borders::ALL)),
             popup,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::app::SessionViewMode;
+
+    use super::*;
+
+    fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            cwd,
+            provider: provider.to_string(),
+            model: None,
+            timestamp: "2026-06-24T00:00:00Z".to_string(),
+            summary: summary.to_string(),
+            file: PathBuf::from(format!("{id}.jsonl")),
+            thread_source: "user".to_string(),
+            parent_thread_id: None,
+            agent_nickname: None,
+            agent_role: None,
+            agent_depth: None,
+        }
+    }
+
+    #[test]
+    fn session_source_label_shows_tree_glyphs_only_in_tree_view() {
+        let cwd = PathBuf::from("/repo/current");
+        let mut child = test_session("child", cwd, "switcher", "summary");
+        child.thread_source = "subagent".to_string();
+        child.parent_thread_id = Some("parent".to_string());
+        child.agent_nickname = Some("Boole".to_string());
+        child.agent_role = Some("worker".to_string());
+
+        assert_eq!(
+            session_source_label(&child, SessionViewMode::Tree, "├─ "),
+            "├─ sub Boole/worker"
+        );
+        assert_eq!(
+            session_source_label(&child, SessionViewMode::Flat, "├─ "),
+            "sub Boole/worker"
+        );
+    }
+
+    #[test]
+    fn orphan_source_label_keeps_parent_id_without_tree_depth() {
+        let cwd = PathBuf::from("/repo/current");
+        let mut child = test_session("child", cwd, "switcher", "summary");
+        child.thread_source = "subagent".to_string();
+        child.parent_thread_id = Some("019f1067-10b5-7d02-8176-093dbc9170fa".to_string());
+        child.agent_nickname = Some("Boole".to_string());
+
+        assert_eq!(
+            session_source_label(&child, SessionViewMode::Tree, "● "),
+            "● sub Boole <- 019f1067"
         );
     }
 }

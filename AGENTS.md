@@ -1,5 +1,20 @@
 # AGENTS.md
 
+## 代码检查
+
+- 修改 Rust 代码后，按 CI lint 配置检查代码。
+- 格式检查：
+
+```sh
+cargo fmt --all -- --check
+```
+
+- Clippy 检查：
+
+```sh
+cargo clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::pedantic -D clippy::nursery -D clippy::cargo
+```
+
 ## 提交
 
 - 使用 Conventional Commits。

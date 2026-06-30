@@ -450,8 +450,7 @@ mod tests {
         first_child.timestamp = "2026-06-24T09:00:00Z".into();
         first_child.thread_source = "subagent".into();
         first_child.parent_thread_id = Some("parent".into());
-        let mut grandchild =
-            test_session("grandchild", current_dir.clone(), "alpha", "grandchild");
+        let mut grandchild = test_session("grandchild", current_dir.clone(), "alpha", "grandchild");
         grandchild.timestamp = "2026-06-24T08:00:00Z".into();
         grandchild.thread_source = "subagent".into();
         grandchild.parent_thread_id = Some("first-child".into());

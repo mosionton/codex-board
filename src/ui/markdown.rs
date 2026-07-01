@@ -24,6 +24,7 @@ fn markdown_options() -> Options {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_MATH);
     options.insert(Options::ENABLE_GFM);
@@ -1131,6 +1132,15 @@ mod tests {
                     |span| span.content.as_ref() == "code" && span.style.fg == Some(Color::Magenta)
                 )
         );
+    }
+
+    #[test]
+    fn markdown_lines_render_footnote_references_and_definitions() {
+        let lines = markdown_lines("text [^1]\n\n[^1]: note", 80);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("text [^1]"));
+        assert!(text.contains("[^1]: note"));
     }
 
     #[test]

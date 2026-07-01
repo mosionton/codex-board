@@ -326,6 +326,42 @@ mod tests {
     }
 
     #[test]
+    fn conversation_lines_render_markdown_message_bodies_with_indent() {
+        let message = test_message(
+            "assistant",
+            "2026-06-24T00:00:01Z",
+            "# Title\n\nA **bold** item\n\n```rust\nfn main() {}\n```",
+        );
+        let messages = vec![&message];
+        let lines = conversation_lines(&messages, 80);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(line_text(&lines[0]).contains("1. assistant"));
+        assert!(text.contains("    # Title"));
+        assert!(text.contains("    A bold item"));
+        assert!(text.contains("    ```rust"));
+        let bold_line = lines
+            .iter()
+            .find(|line| line_text(line).contains("A bold item"))
+            .unwrap();
+        assert_eq!(bold_line.spans[0].content.as_ref(), "    ");
+        assert!(bold_line.spans.iter().any(|span| {
+            span.content.as_ref() == "bold"
+                && span
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+        }));
+        assert!(
+            lines
+                .iter()
+                .skip(1)
+                .filter(|line| !line_text(line).is_empty())
+                .all(|line| line_text(line).starts_with("    "))
+        );
+    }
+
+    #[test]
     fn selected_details_render_fallbacks_and_provider_values() {
         let current_dir = PathBuf::from("/repo/current");
         let app = app_with_sessions_and_registry(

@@ -1,4 +1,4 @@
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -44,6 +44,12 @@ fn inline_code_style() -> Style {
     Style::default().fg(Color::Magenta)
 }
 
+fn link_style() -> Style {
+    Style::default()
+        .fg(Color::Blue)
+        .add_modifier(Modifier::UNDERLINED)
+}
+
 fn math_style() -> Style {
     Style::default().fg(Color::Cyan)
 }
@@ -74,7 +80,21 @@ enum BlockPrefixState {
 
 #[derive(Default)]
 struct CodeBlockState {
+    language: String,
     buffer: String,
+}
+
+#[derive(Default)]
+struct TableState {
+    rows: Vec<Vec<String>>,
+    current_row: Vec<String>,
+    current_cell: String,
+    in_cell: bool,
+}
+
+struct ImageState {
+    url: String,
+    has_alt: bool,
 }
 
 struct MarkdownRenderer {
@@ -84,7 +104,10 @@ struct MarkdownRenderer {
     styles: Vec<TextStyle>,
     lists: Vec<ListState>,
     block_prefixes: Vec<BlockPrefixState>,
+    link_stack: Vec<String>,
+    image_stack: Vec<ImageState>,
     code_block: Option<CodeBlockState>,
+    table: Option<TableState>,
 }
 
 impl MarkdownRenderer {
@@ -96,12 +119,18 @@ impl MarkdownRenderer {
             styles: Vec::new(),
             lists: Vec::new(),
             block_prefixes: Vec::new(),
+            link_stack: Vec::new(),
+            image_stack: Vec::new(),
             code_block: None,
+            table: None,
         }
     }
 
     fn push_event(&mut self, event: Event<'_>) {
         if self.push_code_block_event(&event) {
+            return;
+        }
+        if self.push_table_event(&event) {
             return;
         }
 
@@ -132,18 +161,23 @@ impl MarkdownRenderer {
     fn start_tag(&mut self, tag: Tag<'_>) {
         match tag {
             Tag::Paragraph
-            | Tag::Table(_)
-            | Tag::TableHead
-            | Tag::TableRow
-            | Tag::TableCell
-            | Tag::Link { .. }
-            | Tag::Image { .. }
             | Tag::DefinitionList
             | Tag::DefinitionListTitle
             | Tag::DefinitionListDefinition
             | Tag::Subscript
             | Tag::Superscript
-            | Tag::MetadataBlock(_) => {}
+            | Tag::MetadataBlock(_)
+            | Tag::Table(_)
+            | Tag::TableHead
+            | Tag::TableRow
+            | Tag::TableCell => {}
+            Tag::Link { dest_url, .. } => self.link_stack.push(dest_url.to_string()),
+            Tag::Image { dest_url, .. } => {
+                self.image_stack.push(ImageState {
+                    url: dest_url.to_string(),
+                    has_alt: false,
+                });
+            }
             Tag::Heading { level, .. } => {
                 self.flush_block();
                 self.push_style(heading_style());
@@ -160,10 +194,7 @@ impl MarkdownRenderer {
             Tag::Strikethrough => {
                 self.push_style(Style::default().add_modifier(Modifier::CROSSED_OUT));
             }
-            Tag::CodeBlock(_) => {
-                self.flush_block();
-                self.code_block = Some(CodeBlockState::default());
-            }
+            Tag::CodeBlock(kind) => self.start_code_block(kind),
             Tag::HtmlBlock => {
                 self.flush_block();
                 self.push_style(html_style());
@@ -198,9 +229,22 @@ impl MarkdownRenderer {
             TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => {
                 let _ = self.styles.pop();
             }
-            TagEnd::Link
-            | TagEnd::Image
-            | TagEnd::Table
+            TagEnd::Link => {
+                if let Some(url) = self.link_stack.pop() {
+                    self.push_styled_text(format!(" <{url}>"), link_style());
+                }
+            }
+            TagEnd::Image => {
+                if let Some(image) = self.image_stack.pop() {
+                    if image.has_alt {
+                        self.push_text("]");
+                        self.push_styled_text(format!(" <{}>", image.url), link_style());
+                    } else {
+                        self.push_styled_text(format!("<image: {}>", image.url), link_style());
+                    }
+                }
+            }
+            TagEnd::Table
             | TagEnd::TableHead
             | TagEnd::TableRow
             | TagEnd::TableCell
@@ -255,6 +299,12 @@ impl MarkdownRenderer {
             return;
         }
 
+        if let Some(image) = self.image_stack.last_mut()
+            && !image.has_alt
+        {
+            self.current.push(Span::raw("!["));
+            image.has_alt = true;
+        }
         self.current.push(Span::styled(text, style));
     }
 
@@ -313,15 +363,125 @@ impl MarkdownRenderer {
         true
     }
 
+    fn push_table_event(&mut self, event: &Event<'_>) -> bool {
+        match event {
+            Event::Start(Tag::Table(_)) => {
+                self.flush_block();
+                self.table = Some(TableState::default());
+                true
+            }
+            Event::End(TagEnd::Table) => {
+                self.flush_table();
+                true
+            }
+            Event::Start(Tag::Link { dest_url, .. })
+                if self.table.as_ref().is_some_and(|table| table.in_cell) =>
+            {
+                self.link_stack.push(dest_url.to_string());
+                true
+            }
+            Event::End(TagEnd::Link) if self.table.as_ref().is_some_and(|table| table.in_cell) => {
+                if let Some(url) = self.link_stack.pop() {
+                    self.push_table_text(format!(" <{url}>"));
+                }
+                true
+            }
+            Event::Start(Tag::Image { dest_url, .. })
+                if self.table.as_ref().is_some_and(|table| table.in_cell) =>
+            {
+                self.image_stack.push(ImageState {
+                    url: dest_url.to_string(),
+                    has_alt: false,
+                });
+                true
+            }
+            Event::End(TagEnd::Image) if self.table.as_ref().is_some_and(|table| table.in_cell) => {
+                if let Some(image) = self.image_stack.pop() {
+                    if image.has_alt {
+                        self.push_table_text(format!("] <{}>", image.url));
+                    } else {
+                        self.push_table_text(format!("<image: {}>", image.url));
+                    }
+                }
+                true
+            }
+            Event::Start(Tag::TableHead | Tag::TableRow) => {
+                self.start_table_row();
+                true
+            }
+            Event::End(TagEnd::TableHead | TagEnd::TableRow) => {
+                self.end_table_row();
+                true
+            }
+            Event::Start(Tag::TableCell) => {
+                self.start_table_cell();
+                true
+            }
+            Event::End(TagEnd::TableCell) => {
+                self.end_table_cell();
+                true
+            }
+            Event::Text(text) if self.table.as_ref().is_some_and(|table| table.in_cell) => {
+                self.push_table_text(text.as_ref());
+                true
+            }
+            Event::Code(text) if self.table.as_ref().is_some_and(|table| table.in_cell) => {
+                self.push_table_text(text.as_ref());
+                true
+            }
+            Event::InlineMath(text) if self.table.as_ref().is_some_and(|table| table.in_cell) => {
+                self.push_table_text(format!("${}$", text.as_ref()));
+                true
+            }
+            Event::DisplayMath(text) if self.table.as_ref().is_some_and(|table| table.in_cell) => {
+                self.push_table_text(format!("$${}$$", text.as_ref()));
+                true
+            }
+            Event::Html(text) | Event::InlineHtml(text)
+                if self.table.as_ref().is_some_and(|table| table.in_cell) =>
+            {
+                self.push_table_text(text.as_ref());
+                true
+            }
+            Event::SoftBreak | Event::HardBreak
+                if self.table.as_ref().is_some_and(|table| table.in_cell) =>
+            {
+                self.push_table_text(" ");
+                true
+            }
+            Event::Start(_) | Event::End(_) if self.table.is_some() => true,
+            _ => false,
+        }
+    }
+
+    fn start_code_block(&mut self, kind: CodeBlockKind<'_>) {
+        self.flush_block();
+        let language = match kind {
+            CodeBlockKind::Fenced(info) => info.split_whitespace().next().unwrap_or("").to_string(),
+            CodeBlockKind::Indented => String::new(),
+        };
+        self.code_block = Some(CodeBlockState {
+            language,
+            buffer: String::new(),
+        });
+    }
+
     fn flush_code_block(&mut self) {
         let Some(code_block) = self.code_block.take() else {
             return;
         };
 
         let style = inline_code_style();
+        let fence = if code_block.language.is_empty() {
+            "```".to_string()
+        } else {
+            format!("```{}", code_block.language)
+        };
+        self.push_preformatted_line(&fence, style);
         for line in code_block.buffer.split('\n') {
             self.push_preformatted_line(line, style);
         }
+        self.push_preformatted_line("```", style);
     }
 
     fn first_line_prefix_spans(&mut self) -> Vec<Span<'static>> {
@@ -419,6 +579,77 @@ impl MarkdownRenderer {
             })
     }
 
+    fn start_table_row(&mut self) {
+        if let Some(table) = &mut self.table {
+            table.current_row.clear();
+        }
+    }
+
+    fn end_table_row(&mut self) {
+        if let Some(table) = &mut self.table {
+            table.rows.push(std::mem::take(&mut table.current_row));
+        }
+    }
+
+    fn start_table_cell(&mut self) {
+        if let Some(table) = &mut self.table {
+            table.in_cell = true;
+            table.current_cell.clear();
+        }
+    }
+
+    fn end_table_cell(&mut self) {
+        if let Some(table) = &mut self.table {
+            table.in_cell = false;
+            table
+                .current_row
+                .push(table.current_cell.trim().to_string());
+        }
+    }
+
+    fn push_table_text<T>(&mut self, text: T)
+    where
+        T: AsRef<str>,
+    {
+        if let Some(table) = &mut self.table {
+            if let Some(image) = self.image_stack.last_mut()
+                && !image.has_alt
+            {
+                table.current_cell.push_str("![");
+                image.has_alt = true;
+            }
+            table.current_cell.push_str(text.as_ref());
+        }
+    }
+
+    fn flush_table(&mut self) {
+        let Some(table) = self.table.take() else {
+            return;
+        };
+
+        let column_count = table.rows.iter().map(Vec::len).max().unwrap_or(0);
+        let mut widths = vec![3; column_count];
+        for row in &table.rows {
+            for (index, cell) in row.iter().enumerate() {
+                widths[index] = widths[index].max(escaped_table_cell_width(cell));
+            }
+        }
+
+        for (index, row) in table.rows.iter().enumerate() {
+            self.push_preformatted_line(&render_table_row(row, &widths), Style::default());
+            if index == 0 {
+                let separator = widths
+                    .iter()
+                    .map(|width| "-".repeat(*width))
+                    .collect::<Vec<_>>();
+                self.push_preformatted_line(
+                    &render_table_row(&separator, &widths),
+                    Style::default(),
+                );
+            }
+        }
+    }
+
     fn push_preformatted_line(&mut self, text: &str, style: Style) {
         let first_prefix = self.first_line_prefix_spans();
         let continuation_prefix = self.continuation_prefix_spans();
@@ -430,6 +661,29 @@ impl MarkdownRenderer {
             self.width,
         ));
     }
+}
+
+fn render_table_row(row: &[String], widths: &[usize]) -> String {
+    let mut output = String::from("|");
+    for (index, width) in widths.iter().enumerate() {
+        let cell = row.get(index).map_or("", String::as_str);
+        let cell = escape_table_cell(cell);
+        let padding = width.saturating_sub(UnicodeWidthStr::width(cell.as_str()));
+        output.push(' ');
+        output.push_str(&cell);
+        output.push_str(&" ".repeat(padding));
+        output.push(' ');
+        output.push('|');
+    }
+    output
+}
+
+fn escape_table_cell(cell: &str) -> String {
+    cell.replace('|', "\\|")
+}
+
+fn escaped_table_cell_width(cell: &str) -> usize {
+    UnicodeWidthStr::width(escape_table_cell(cell).as_str())
 }
 
 const fn heading_marker(level: HeadingLevel) -> &'static str {
@@ -994,11 +1248,11 @@ mod tests {
 
     #[test]
     fn markdown_lines_split_long_code_block_lines_by_display_width() {
-        let lines = markdown_lines("```text\nabcdefghi\n```", 5);
+        let lines = markdown_lines("```\nabcdefghi\n```", 5);
         let text = lines.iter().map(line_text).collect::<Vec<_>>();
 
         assert!(text.len() > 1);
-        assert_eq!(text.join(""), "abcdefghi");
+        assert!(text.join("").contains("abcdefghi"));
         assert!(
             text.iter()
                 .all(|line| UnicodeWidthStr::width(line.as_str()) <= 5)
@@ -1020,6 +1274,103 @@ mod tests {
         let text = lines.iter().map(line_text).collect::<Vec<_>>();
 
         assert!(text.iter().any(|line| line.starts_with("  ---")));
+    }
+
+    #[test]
+    fn markdown_lines_keep_links_and_images_targets_visible() {
+        let lines = markdown_lines(
+            "[site](https://example.test) ![logo](https://img.test/a.png)",
+            100,
+        );
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("site <https://example.test>"));
+        assert!(text.contains("![logo] <https://img.test/a.png>"));
+    }
+
+    #[test]
+    fn markdown_lines_render_empty_alt_image_as_image_fallback() {
+        let lines = markdown_lines("![](https://img.test/a.png)", 100);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("<image: https://img.test/a.png>"));
+    }
+
+    #[test]
+    fn markdown_lines_keep_styled_image_alt_as_non_empty() {
+        let lines = markdown_lines("![`logo` text](https://img.test/a.png)", 100);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("![logo text] <https://img.test/a.png>"));
+        assert!(!text.contains("<image: https://img.test/a.png>"));
+    }
+
+    #[test]
+    fn markdown_lines_render_fenced_code_with_language_label() {
+        let lines = markdown_lines("```json\n{\"ok\": true}\n```", 80);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("```json"));
+        assert!(text.contains("{\"ok\": true}"));
+        assert!(text.contains("```"));
+    }
+
+    #[test]
+    fn markdown_lines_render_tables_as_terminal_text() {
+        let lines = markdown_lines("| 名称 | value |\n| --- | ---: |\n| 宽字符 | 42 |", 80);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("名称"));
+        assert!(text.contains("value"));
+        assert!(text.contains("宽字符"));
+        assert!(text.contains("42"));
+        assert!(text.lines().any(|line| line.contains("---")));
+    }
+
+    #[test]
+    fn markdown_lines_keep_table_cell_link_and_image_targets_visible() {
+        let lines = markdown_lines(
+            "| link | image |\n| --- | --- |\n| [site](https://example.test) | ![logo](https://img.test/a.png) |",
+            120,
+        );
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("site <https://example.test>"));
+        assert!(text.contains("![logo] <https://img.test/a.png>"));
+    }
+
+    #[test]
+    fn markdown_lines_escape_pipe_characters_inside_table_cells() {
+        let lines = markdown_lines("| value |\n| --- |\n| `a\\|b` |", 80);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("a\\|b"));
+    }
+
+    #[test]
+    fn markdown_lines_size_table_columns_after_escaping_pipes() {
+        let lines = markdown_lines("| value |\n| --- |\n| `a\\|b\\|c` |", 80);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>();
+        let separator = text.iter().find(|line| line.contains("---")).unwrap();
+        let value = text.iter().find(|line| line.contains("a\\|b\\|c")).unwrap();
+
+        assert!(
+            UnicodeWidthStr::width(separator.as_str()) >= UnicodeWidthStr::width(value.as_str())
+        );
+    }
+
+    #[test]
+    fn markdown_lines_preserve_mermaid_latex_and_html_as_safe_text() {
+        let lines = markdown_lines(
+            "```mermaid\ngraph TD\nA-->B\n```\n\n$$x^2$$\n\n<div>safe</div>",
+            80,
+        );
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("```mermaid"));
+        assert!(text.contains("graph TD"));
+        assert!(text.contains("$$x^2$$"));
+        assert!(text.contains("<div>safe</div>"));
     }
 
     #[test]

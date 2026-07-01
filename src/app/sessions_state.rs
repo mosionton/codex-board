@@ -10,7 +10,7 @@ use crate::session_store::{Session, matches_search, search_terms};
 use super::{ProviderTabs, Scope, SearchState, TableSelection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SessionViewMode {
+pub enum SessionViewMode {
     Tree,
     Flat,
 }
@@ -22,6 +22,7 @@ pub struct SessionsState {
     pub(super) visible_indices: Vec<usize>,
     pub(super) visible_depths: Vec<usize>,
     pub(super) visible_tree_prefixes: Vec<String>,
+    pub(super) visible_parent_links: Vec<bool>,
     pub(super) view_mode: SessionViewMode,
     pub(super) search: SearchState,
     pub(super) scope: Scope,
@@ -39,6 +40,7 @@ impl SessionsState {
             visible_indices: Vec::new(),
             visible_depths: Vec::new(),
             visible_tree_prefixes: Vec::new(),
+            visible_parent_links: Vec::new(),
             view_mode: SessionViewMode::Tree,
             search: SearchState::default(),
             scope: Scope::CurrentDir,
@@ -91,13 +93,14 @@ impl SessionsState {
         self.view_mode
     }
 
-    pub(crate) fn toggle_view_mode(&mut self) {
+    pub(crate) const fn toggle_view_mode(&mut self) {
         self.view_mode = match self.view_mode {
             SessionViewMode::Tree => SessionViewMode::Flat,
             SessionViewMode::Flat => SessionViewMode::Tree,
         };
     }
 
+    #[cfg(test)]
     pub(crate) fn visible_depth(&self, visible_index: usize) -> usize {
         self.visible_depths
             .get(visible_index)
@@ -109,6 +112,13 @@ impl SessionsState {
         self.visible_tree_prefixes
             .get(visible_index)
             .map_or("", String::as_str)
+    }
+
+    pub(crate) fn visible_parent_link(&self, visible_index: usize) -> bool {
+        self.visible_parent_links
+            .get(visible_index)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub(crate) fn visible_session(&self, visible_index: usize) -> Option<&Session> {
@@ -152,6 +162,7 @@ impl SessionsState {
     }
 
     fn rebuild_flat_visible(&mut self, candidates: Vec<usize>) {
+        self.visible_parent_links = self.parent_link_flags(&candidates);
         self.visible_depths = vec![0; candidates.len()];
         self.visible_tree_prefixes = vec![String::new(); candidates.len()];
         self.visible_indices = candidates;
@@ -188,42 +199,44 @@ impl SessionsState {
             sort_session_indices(&self.items, child_indices);
         }
 
-        self.visible_indices.clear();
-        self.visible_depths.clear();
-        self.visible_tree_prefixes.clear();
-        let mut visited = HashSet::new();
+        let mut rows = TreeRows::new(&children);
         for root in roots {
-            append_tree_row(
-                root,
-                0,
-                "● ".to_string(),
-                String::new(),
-                &children,
-                &mut visited,
-                &mut self.visible_indices,
-                &mut self.visible_depths,
-                &mut self.visible_tree_prefixes,
-            );
+            let show_parent_link = self.items[root].parent_thread_id.is_some();
+            rows.append(root, 0, "● ".to_string(), show_parent_link, "");
         }
 
         let mut remaining = candidate_set
             .into_iter()
-            .filter(|index| !visited.contains(index))
+            .filter(|index| !rows.is_visited(*index))
             .collect::<Vec<_>>();
         sort_session_indices(&self.items, &mut remaining);
         for index in remaining {
-            append_tree_row(
-                index,
-                0,
-                "● ".to_string(),
-                String::new(),
-                &children,
-                &mut visited,
-                &mut self.visible_indices,
-                &mut self.visible_depths,
-                &mut self.visible_tree_prefixes,
-            );
+            let show_parent_link = self.items[index].parent_thread_id.is_some();
+            rows.append(index, 0, "● ".to_string(), show_parent_link, "");
         }
+
+        let (visible_indices, visible_depths, visible_tree_prefixes, visible_parent_links) =
+            rows.into_parts();
+        self.visible_indices = visible_indices;
+        self.visible_depths = visible_depths;
+        self.visible_tree_prefixes = visible_tree_prefixes;
+        self.visible_parent_links = visible_parent_links;
+    }
+
+    fn parent_link_flags(&self, indices: &[usize]) -> Vec<bool> {
+        let ids = indices
+            .iter()
+            .filter_map(|index| Some(self.items.get(*index)?.id.as_str()))
+            .collect::<HashSet<_>>();
+        indices
+            .iter()
+            .map(|index| {
+                self.items
+                    .get(*index)
+                    .and_then(|session| session.parent_thread_id.as_deref())
+                    .is_some_and(|parent_id| !ids.contains(parent_id))
+            })
+            .collect()
     }
 
     pub(crate) fn rebuild_provider_tabs_preserving_label(&mut self, selected_label: Option<&str>) {
@@ -302,41 +315,71 @@ fn sort_session_indices(items: &[Session], indices: &mut [usize]) {
     });
 }
 
-fn append_tree_row(
-    index: usize,
-    depth: usize,
-    tree_prefix: String,
-    child_prefix_base: String,
-    children: &HashMap<usize, Vec<usize>>,
-    visited: &mut HashSet<usize>,
-    visible_indices: &mut Vec<usize>,
-    visible_depths: &mut Vec<usize>,
-    visible_tree_prefixes: &mut Vec<String>,
-) {
-    if !visited.insert(index) {
-        return;
-    }
-    visible_indices.push(index);
-    visible_depths.push(depth);
-    visible_tree_prefixes.push(tree_prefix);
+struct TreeRows<'a> {
+    children: &'a HashMap<usize, Vec<usize>>,
+    visited: HashSet<usize>,
+    visible_indices: Vec<usize>,
+    visible_depths: Vec<usize>,
+    visible_tree_prefixes: Vec<String>,
+    visible_parent_links: Vec<bool>,
+}
 
-    if let Some(child_indices) = children.get(&index) {
-        for (child_position, child_index) in child_indices.iter().enumerate() {
-            let is_last = child_position + 1 == child_indices.len();
-            let connector = if is_last { "└─ " } else { "├─ " };
-            let next_child_prefix_base = if is_last { "   " } else { "│  " };
-            append_tree_row(
-                *child_index,
-                depth + 1,
-                format!("{child_prefix_base}{connector}"),
-                format!("{child_prefix_base}{next_child_prefix_base}"),
-                children,
-                visited,
-                visible_indices,
-                visible_depths,
-                visible_tree_prefixes,
-            );
+impl<'a> TreeRows<'a> {
+    fn new(children: &'a HashMap<usize, Vec<usize>>) -> Self {
+        Self {
+            children,
+            visited: HashSet::new(),
+            visible_indices: Vec::new(),
+            visible_depths: Vec::new(),
+            visible_tree_prefixes: Vec::new(),
+            visible_parent_links: Vec::new(),
         }
+    }
+
+    fn is_visited(&self, index: usize) -> bool {
+        self.visited.contains(&index)
+    }
+
+    fn append(
+        &mut self,
+        index: usize,
+        depth: usize,
+        tree_prefix: String,
+        show_parent_link: bool,
+        child_prefix_base: &str,
+    ) {
+        if !self.visited.insert(index) {
+            return;
+        }
+        self.visible_indices.push(index);
+        self.visible_depths.push(depth);
+        self.visible_tree_prefixes.push(tree_prefix);
+        self.visible_parent_links.push(show_parent_link);
+
+        if let Some(child_indices) = self.children.get(&index) {
+            for (child_position, child_index) in child_indices.iter().enumerate() {
+                let is_last = child_position + 1 == child_indices.len();
+                let connector = if is_last { "└─ " } else { "├─ " };
+                let next_child_prefix_base = if is_last { "   " } else { "│  " };
+                let next_child_prefix = format!("{child_prefix_base}{next_child_prefix_base}");
+                self.append(
+                    *child_index,
+                    depth + 1,
+                    format!("{child_prefix_base}{connector}"),
+                    false,
+                    &next_child_prefix,
+                );
+            }
+        }
+    }
+
+    fn into_parts(self) -> (Vec<usize>, Vec<usize>, Vec<String>, Vec<bool>) {
+        (
+            self.visible_indices,
+            self.visible_depths,
+            self.visible_tree_prefixes,
+            self.visible_parent_links,
+        )
     }
 }
 

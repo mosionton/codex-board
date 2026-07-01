@@ -61,18 +61,7 @@ fn parse_session_file(path: &Path) -> Result<Option<Session>> {
     let file = fs::File::open(path)
         .with_context(|| format!("failed to open session file {}", path.display()))?;
     let reader = io::BufReader::new(file);
-
-    let mut id = None;
-    let mut cwd = None;
-    let mut provider = None;
-    let mut timestamp = None;
-    let mut model = None;
-    let mut summary = None;
-    let mut thread_source = None;
-    let mut parent_thread_id = None;
-    let mut agent_nickname = None;
-    let mut agent_role = None;
-    let mut agent_depth = None;
+    let mut parsed = ParsedSession::default();
 
     for line in reader.lines().take(160) {
         let line =
@@ -87,99 +76,132 @@ fn parse_session_file(path: &Path) -> Result<Option<Session>> {
 
         match json.get("type").and_then(JsonValue::as_str) {
             Some("session_meta") => {
-                let spawn = subagent_spawn(payload);
-                id = payload
-                    .get("id")
-                    .or_else(|| payload.get("session_id"))
-                    .and_then(JsonValue::as_str)
-                    .map(str::to_string);
-                cwd = payload
-                    .get("cwd")
-                    .and_then(JsonValue::as_str)
-                    .map(PathBuf::from);
-                provider = payload
-                    .get("model_provider")
-                    .and_then(JsonValue::as_str)
-                    .map(str::to_string);
-                timestamp = payload
-                    .get("timestamp")
-                    .and_then(JsonValue::as_str)
-                    .or_else(|| json.get("timestamp").and_then(JsonValue::as_str))
-                    .map(str::to_string);
-                thread_source = payload
-                    .get("thread_source")
-                    .and_then(JsonValue::as_str)
-                    .map(str::to_string);
-                parent_thread_id = optional_string_from(
-                    payload.get("parent_thread_id"),
-                    spawn.and_then(|spawn| spawn.get("parent_thread_id")),
-                );
-                agent_nickname = optional_string_from(
-                    payload.get("agent_nickname"),
-                    spawn.and_then(|spawn| spawn.get("agent_nickname")),
-                );
-                agent_role = optional_string_from(
-                    payload.get("agent_role"),
-                    spawn.and_then(|spawn| spawn.get("agent_role")),
-                );
-                agent_depth = spawn
-                    .and_then(|spawn| spawn.get("depth"))
-                    .and_then(JsonValue::as_u64)
-                    .and_then(|depth| u32::try_from(depth).ok());
+                parsed
+                    .apply_session_meta(payload, json.get("timestamp").and_then(JsonValue::as_str));
             }
-            Some("turn_context") if model.is_none() => {
-                model = payload
+            Some("turn_context") if parsed.model.is_none() => {
+                parsed.model = payload
                     .get("model")
                     .and_then(JsonValue::as_str)
                     .map(str::to_string);
             }
-            Some("response_item") if summary.is_none() => {
-                summary = extract_user_summary(payload);
+            Some("response_item") if parsed.summary.is_none() => {
+                parsed.summary = extract_user_summary(payload);
             }
             _ => {}
         }
 
-        if id.is_some()
-            && cwd.is_some()
-            && provider.is_some()
-            && timestamp.is_some()
-            && model.is_some()
-            && summary.is_some()
-        {
+        if parsed.is_complete() {
             break;
         }
     }
 
-    let Some(id) = id else {
-        return Ok(None);
-    };
-    let Some(cwd) = cwd else {
-        return Ok(None);
-    };
-    let Some(provider) = provider else {
-        return Ok(None);
-    };
+    Ok(parsed.into_session(path))
+}
 
-    let summary = summary.unwrap_or_else(|| fallback_summary(path, &id));
+#[derive(Default)]
+struct ParsedSession {
+    id: Option<String>,
+    cwd: Option<PathBuf>,
+    provider: Option<String>,
+    timestamp: Option<String>,
+    model: Option<String>,
+    summary: Option<String>,
+    thread_source: Option<String>,
+    parent_thread_id: Option<String>,
+    agent_nickname: Option<String>,
+    agent_role: Option<String>,
+    agent_depth: Option<u32>,
+}
 
-    Ok(Some(Session {
-        id,
-        cwd,
-        provider,
-        model,
-        timestamp: timestamp.unwrap_or_default(),
-        summary,
-        file: path.to_path_buf(),
-        thread_source: thread_source.unwrap_or_else(|| "user".to_string()),
-        parent_thread_id,
-        agent_nickname,
-        agent_role,
-        agent_depth,
-    }))
+impl ParsedSession {
+    fn apply_session_meta(&mut self, payload: &JsonValue, fallback_timestamp: Option<&str>) {
+        let spawn = subagent_spawn(payload);
+        let source_name = subagent_source_name(payload);
+        self.id = payload
+            .get("id")
+            .or_else(|| payload.get("session_id"))
+            .and_then(JsonValue::as_str)
+            .map(str::to_string);
+        self.cwd = payload
+            .get("cwd")
+            .and_then(JsonValue::as_str)
+            .map(PathBuf::from);
+        self.provider = payload
+            .get("model_provider")
+            .and_then(JsonValue::as_str)
+            .map(str::to_string);
+        self.timestamp = payload
+            .get("timestamp")
+            .and_then(JsonValue::as_str)
+            .or(fallback_timestamp)
+            .map(str::to_string);
+        self.thread_source = payload
+            .get("thread_source")
+            .and_then(JsonValue::as_str)
+            .map(str::to_string);
+        self.parent_thread_id = optional_string_from(
+            payload.get("parent_thread_id"),
+            spawn.and_then(|spawn| spawn.get("parent_thread_id")),
+        );
+        self.agent_nickname = optional_string_from(
+            payload.get("agent_nickname"),
+            spawn
+                .and_then(|spawn| spawn.get("agent_nickname"))
+                .or(source_name),
+        );
+        self.agent_role = optional_string_from(
+            payload.get("agent_role"),
+            spawn.and_then(|spawn| spawn.get("agent_role")),
+        );
+        self.agent_depth = spawn
+            .and_then(|spawn| spawn.get("depth"))
+            .and_then(JsonValue::as_u64)
+            .and_then(|depth| u32::try_from(depth).ok());
+    }
+
+    const fn is_complete(&self) -> bool {
+        self.id.is_some()
+            && self.cwd.is_some()
+            && self.provider.is_some()
+            && self.timestamp.is_some()
+            && self.model.is_some()
+            && self.summary.is_some()
+    }
+
+    fn into_session(self, path: &Path) -> Option<Session> {
+        let id = self.id?;
+        let cwd = self.cwd?;
+        let provider = self.provider?;
+        let summary = self.summary.unwrap_or_else(|| fallback_summary(path, &id));
+
+        Some(Session {
+            id,
+            cwd,
+            provider,
+            model: self.model,
+            timestamp: self.timestamp.unwrap_or_default(),
+            summary,
+            file: path.to_path_buf(),
+            thread_source: self.thread_source.unwrap_or_else(|| "user".to_string()),
+            parent_thread_id: self.parent_thread_id,
+            agent_nickname: self.agent_nickname,
+            agent_role: self.agent_role,
+            agent_depth: self.agent_depth,
+        })
+    }
+}
+
+fn subagent_source(payload: &JsonValue) -> Option<&JsonValue> {
+    payload.get("source")?.get("subagent")
 }
 
 fn subagent_spawn(payload: &JsonValue) -> Option<&JsonValue> {
-    payload.get("source")?.get("subagent")?.get("thread_spawn")
+    subagent_source(payload)?.get("thread_spawn")
+}
+
+fn subagent_source_name(payload: &JsonValue) -> Option<&JsonValue> {
+    subagent_source(payload).filter(|source| source.is_string())
 }
 
 fn optional_string_from(
@@ -444,6 +466,27 @@ mod tests {
         assert_eq!(session.agent_nickname.as_deref(), Some("Boole"));
         assert_eq!(session.agent_role.as_deref(), Some("worker"));
         assert_eq!(session.agent_depth, Some(1));
+    }
+
+    #[test]
+    fn parses_subagent_name_from_string_source() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            r#"{"timestamp":"2026-06-24T03:29:57Z","type":"session_meta","payload":{"id":"child","session_id":"parent","parent_thread_id":"parent","timestamp":"2026-06-24T03:29:57Z","cwd":"/tmp/project","model_provider":"switcher","thread_source":"subagent","source":{"subagent":"review"}}}"#
+                .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        let session = parse_session_file(&path).unwrap().unwrap();
+
+        assert_eq!(session.thread_source, "subagent");
+        assert_eq!(session.parent_thread_id.as_deref(), Some("parent"));
+        assert_eq!(session.agent_nickname.as_deref(), Some("review"));
+        assert_eq!(session.agent_role, None);
+        assert_eq!(session.agent_depth, None);
     }
 
     #[test]

@@ -82,7 +82,7 @@ pub(crate) struct App {
 }
 
 pub(crate) enum AppAction {
-    Resume(Session),
+    Resume(Box<Session>),
     Quit,
 }
 

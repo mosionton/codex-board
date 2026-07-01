@@ -43,6 +43,7 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
                 session,
                 app.session_state.view_mode(),
                 app.session_state.visible_tree_prefix(index),
+                app.session_state.visible_parent_link(index),
             );
             let provider_style = Style::default().fg(Color::Cyan);
             Some(Row::new([
@@ -86,6 +87,7 @@ fn session_source_label(
     session: &Session,
     view_mode: SessionViewMode,
     tree_prefix: &str,
+    show_parent_link: bool,
 ) -> String {
     let is_subagent = session.thread_source == "subagent" || session.parent_thread_id.is_some();
     let mut label = if is_subagent {
@@ -93,9 +95,7 @@ fn session_source_label(
     } else {
         session.thread_source.clone()
     };
-    if is_orphan_root(session, view_mode, tree_prefix)
-        && let Some(parent) = session.parent_thread_id.as_deref()
-    {
+    if show_parent_link && let Some(parent) = session.parent_thread_id.as_deref() {
         label.push_str(" <- ");
         label.push_str(&short_session_id(parent));
     }
@@ -124,10 +124,6 @@ fn subagent_source_label(session: &Session) -> String {
         label.push_str(role);
     }
     label
-}
-
-fn is_orphan_root(session: &Session, view_mode: SessionViewMode, tree_prefix: &str) -> bool {
-    view_mode == SessionViewMode::Tree && tree_prefix == "● " && session.parent_thread_id.is_some()
 }
 
 fn short_session_id(session_id: &str) -> String {
@@ -222,11 +218,11 @@ mod tests {
         child.agent_role = Some("worker".to_string());
 
         assert_eq!(
-            session_source_label(&child, SessionViewMode::Tree, "├─ "),
+            session_source_label(&child, SessionViewMode::Tree, "├─ ", false),
             "├─ sub Boole/worker"
         );
         assert_eq!(
-            session_source_label(&child, SessionViewMode::Flat, "├─ "),
+            session_source_label(&child, SessionViewMode::Flat, "├─ ", false),
             "sub Boole/worker"
         );
     }
@@ -240,8 +236,22 @@ mod tests {
         child.agent_nickname = Some("Boole".to_string());
 
         assert_eq!(
-            session_source_label(&child, SessionViewMode::Tree, "● "),
+            session_source_label(&child, SessionViewMode::Tree, "● ", true),
             "● sub Boole <- 019f1067"
+        );
+    }
+
+    #[test]
+    fn flat_orphan_source_label_keeps_parent_id() {
+        let cwd = PathBuf::from("/repo/current");
+        let mut child = test_session("child", cwd, "switcher", "summary");
+        child.thread_source = "subagent".to_string();
+        child.parent_thread_id = Some("019f1067-10b5-7d02-8176-093dbc9170fa".to_string());
+        child.agent_nickname = Some("Boole".to_string());
+
+        assert_eq!(
+            session_source_label(&child, SessionViewMode::Flat, "", true),
+            "sub Boole <- 019f1067"
         );
     }
 }

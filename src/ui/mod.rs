@@ -380,7 +380,7 @@ mod tests {
         assert!(session_detail_text.contains("role"));
         assert!(session_detail_text.contains("worker"));
         assert!(session_detail_text.contains("depth"));
-        assert!(session_detail_text.contains("1"));
+        assert!(session_detail_text.contains('1'));
         assert!(
             provider_lines
                 .iter()

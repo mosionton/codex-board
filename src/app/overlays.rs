@@ -6,7 +6,7 @@ use super::{App, AppAction, Overlay, ensure_session_cwd_exists};
 pub enum ConfirmationAction {
     ApplyProvider(String),
     DeleteProvider(String),
-    ResumeSession(Session),
+    ResumeSession(Box<Session>),
     SaveProvider(String),
 }
 

@@ -57,7 +57,7 @@ impl App {
             self.show_error(format!("Cannot resume session: {err}"));
             return;
         }
-        self.confirmation = Some(ConfirmationAction::ResumeSession(session));
+        self.confirmation = Some(ConfirmationAction::ResumeSession(Box::new(session)));
         self.overlay = Some(Overlay::Confirmation);
         self.clear_status();
     }

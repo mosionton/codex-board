@@ -481,11 +481,11 @@ mod tests {
         let session_dir = dir.path().join("project");
         std::fs::create_dir(&session_dir).unwrap();
         let mut app = app_with_registry(ProviderRegistry::default());
-        app.confirmation = Some(ConfirmationAction::ResumeSession(test_session(
+        app.confirmation = Some(ConfirmationAction::ResumeSession(Box::new(test_session(
             "session-1",
             session_dir,
             "resume request",
-        )));
+        ))));
         app.overlay = Some(Overlay::Confirmation);
 
         handle_confirmation_key(

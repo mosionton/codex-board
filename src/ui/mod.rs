@@ -26,6 +26,7 @@ mod details;
 mod input;
 mod input_view;
 mod layout;
+mod markdown;
 mod overlay_input;
 mod page_input;
 mod provider_editor_input;

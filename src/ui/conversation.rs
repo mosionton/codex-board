@@ -10,7 +10,10 @@ use crate::{
     session_store::{ConversationEntry, search_terms},
 };
 
-use super::layout::{centered_rect_size, details_dialog_height, percent_len, wrap_text};
+use super::{
+    layout::{centered_rect_size, details_dialog_height, percent_len},
+    markdown::markdown_lines,
+};
 
 pub(super) fn draw_conversation_dialog(frame: &mut ratatui::Frame<'_>, app: &mut App, area: Rect) {
     let popup_width = percent_len(area.width, 90)
@@ -123,8 +126,10 @@ pub(super) fn conversation_lines(
             ),
             Span::raw(format!("  {}", message.timestamp)),
         ]));
-        for part in wrap_text(&message.text, text_width) {
-            lines.push(Line::from(vec![Span::raw("    "), Span::raw(part)]));
+        for markdown_line in markdown_lines(&message.text, text_width) {
+            let mut spans = vec![Span::raw("    ")];
+            spans.extend(markdown_line.spans);
+            lines.push(Line::from(spans));
         }
     }
     lines

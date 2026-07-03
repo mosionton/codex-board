@@ -7,7 +7,7 @@ use ratatui::widgets::TableState;
 
 use crate::session_store::{Session, matches_search, search_terms};
 
-use super::{ProviderTabs, Scope, SearchState, TableSelection};
+use super::{ProviderTabs, Scope, SearchState, TableSelection, session_matches_current_dir};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionViewMode {
@@ -142,7 +142,7 @@ impl SessionsState {
             .iter()
             .enumerate()
             .filter(|(_, session)| match self.scope {
-                Scope::CurrentDir => session.cwd == self.current_dir,
+                Scope::CurrentDir => session_matches_current_dir(&session.cwd, &self.current_dir),
                 Scope::All => true,
             })
             .filter(|(_, session)| {
@@ -386,6 +386,7 @@ impl<'a> TreeRows<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
         Session {
@@ -402,6 +403,44 @@ mod tests {
             agent_role: None,
             agent_depth: None,
         }
+    }
+
+    #[test]
+    fn refresh_visible_matches_canonical_equivalent_current_dir() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let current_dir = project.join(".");
+        let mut state = SessionsState::new(
+            vec![test_session("1", project, "alpha", "first request")],
+            current_dir,
+            PathBuf::from("sessions"),
+        );
+
+        state.refresh_visible();
+
+        assert_eq!(state.visible_len(), 1);
+        assert_eq!(state.selected_session().unwrap().id, "1");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refresh_visible_matches_symlinked_current_dir() {
+        let dir = tempdir().unwrap();
+        let real_project = dir.path().join("real-project");
+        let linked_project = dir.path().join("linked-project");
+        std::fs::create_dir(&real_project).unwrap();
+        std::os::unix::fs::symlink(&real_project, &linked_project).unwrap();
+        let mut state = SessionsState::new(
+            vec![test_session("1", real_project, "alpha", "first request")],
+            linked_project,
+            PathBuf::from("sessions"),
+        );
+
+        state.refresh_visible();
+
+        assert_eq!(state.visible_len(), 1);
+        assert_eq!(state.selected_session().unwrap().id, "1");
     }
 
     #[test]

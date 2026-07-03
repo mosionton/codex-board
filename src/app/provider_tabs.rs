@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, path::Path};
 
 use crate::session_store::Session;
 
-use super::{Scope, cycle_index};
+use super::{CurrentDirMatcher, Scope, cycle_index};
 
 const ALL_PROVIDERS_LABEL: &str = "All";
 
@@ -84,13 +84,82 @@ impl ProviderTabs {
 
 fn build_labels(sessions: &[Session], scope: Scope, current_dir: &Path) -> Vec<String> {
     let mut provider_tabs = BTreeSet::new();
-    for session in sessions {
-        if scope == Scope::CurrentDir && session.cwd != current_dir {
-            continue;
+    match scope {
+        Scope::CurrentDir => {
+            let current_dir_matcher = CurrentDirMatcher::new(current_dir);
+            for session in sessions {
+                if current_dir_matcher.matches(&session.cwd) {
+                    provider_tabs.insert(session.provider.clone());
+                }
+            }
         }
-        provider_tabs.insert(session.provider.clone());
+        Scope::All => {
+            for session in sessions {
+                provider_tabs.insert(session.provider.clone());
+            }
+        }
     }
     let mut tabs = vec![ALL_PROVIDERS_LABEL.to_string()];
     tabs.extend(provider_tabs);
     tabs
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use tempfile::tempdir;
+
+    use super::*;
+
+    fn test_session(id: &str, cwd: PathBuf, provider: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            cwd,
+            provider: provider.to_string(),
+            model: None,
+            timestamp: "2026-06-24T00:00:00Z".to_string(),
+            summary: "summary".to_string(),
+            file: PathBuf::from(format!("{id}.jsonl")),
+            thread_source: "user".to_string(),
+            parent_thread_id: None,
+            agent_nickname: None,
+            agent_role: None,
+            agent_depth: None,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_dir_tabs_include_symlink_equivalent_session_provider() {
+        let dir = tempdir().unwrap();
+        let real_project = dir.path().join("real-project");
+        let linked_project = dir.path().join("linked-project");
+        let other_project = dir.path().join("other");
+        std::fs::create_dir(&real_project).unwrap();
+        std::fs::create_dir(&other_project).unwrap();
+        std::os::unix::fs::symlink(&real_project, &linked_project).unwrap();
+        let sessions = vec![
+            test_session("1", real_project, "alpha"),
+            test_session("2", other_project, "beta"),
+        ];
+
+        assert_eq!(
+            ProviderTabs::new(&sessions, Scope::CurrentDir, &linked_project).labels(),
+            vec!["All".to_string(), "alpha".to_string()]
+        );
+    }
+
+    #[test]
+    fn current_dir_tabs_exclude_different_missing_paths() {
+        let dir = tempdir().unwrap();
+        let current_dir = dir.path().join("missing");
+        let session_cwd = current_dir.join(".");
+        let sessions = vec![test_session("1", session_cwd, "alpha")];
+
+        assert_eq!(
+            ProviderTabs::new(&sessions, Scope::CurrentDir, &current_dir).labels(),
+            vec!["All".to_string()]
+        );
+    }
 }

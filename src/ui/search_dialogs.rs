@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, Scope},
+    app::{App, CurrentDirMatcher, Scope},
     session_store::{matches_search, search_terms},
 };
 
@@ -53,12 +53,17 @@ pub(super) fn draw_session_search_dialog(frame: &mut ratatui::Frame<'_>, app: &A
 fn session_search_match_count(app: &App, query: &str) -> usize {
     let selected_provider = app.session_state.provider_tabs().selected_provider();
     let terms = search_terms(query);
+    let current_dir_matcher = match app.session_state.scope() {
+        Scope::CurrentDir => Some(CurrentDirMatcher::new(app.session_state.current_dir())),
+        Scope::All => None,
+    };
     app.session_state
         .items()
         .iter()
-        .filter(|session| match app.session_state.scope() {
-            Scope::CurrentDir => session.cwd == app.session_state.current_dir(),
-            Scope::All => true,
+        .filter(|session| {
+            current_dir_matcher
+                .as_ref()
+                .is_none_or(|matcher| matcher.matches(&session.cwd))
         })
         .filter(|session| {
             selected_provider.is_none_or(|provider| provider == session.provider.as_str())
@@ -120,6 +125,7 @@ mod tests {
 
     use super::*;
     use crate::{provider_config::ProviderRegistry, session_store::Session};
+    use tempfile::tempdir;
 
     fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
         Session {
@@ -164,5 +170,30 @@ mod tests {
         assert_eq!(session_search_match_count(&app, "request"), 1);
         app.toggle_scope();
         assert_eq!(session_search_match_count(&app, "third"), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn session_search_match_count_matches_symlink_equivalent_current_dir() {
+        let dir = tempdir().unwrap();
+        let real_project = dir.path().join("real-project");
+        let linked_project = dir.path().join("linked-project");
+        std::fs::create_dir(&real_project).unwrap();
+        std::os::unix::fs::symlink(&real_project, &linked_project).unwrap();
+        let sessions = vec![test_session("1", real_project, "alpha", "first request")];
+        let app = app_with_sessions(sessions, linked_project);
+
+        assert_eq!(session_search_match_count(&app, "request"), 1);
+    }
+
+    #[test]
+    fn session_search_match_count_excludes_different_missing_paths() {
+        let dir = tempdir().unwrap();
+        let current_dir = dir.path().join("missing");
+        let session_cwd = current_dir.join(".");
+        let sessions = vec![test_session("1", session_cwd, "alpha", "first request")];
+        let app = app_with_sessions(sessions, current_dir);
+
+        assert_eq!(session_search_match_count(&app, "request"), 0);
     }
 }

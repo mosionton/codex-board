@@ -7,7 +7,7 @@ use ratatui::widgets::TableState;
 
 use crate::session_store::{Session, matches_search, search_terms};
 
-use super::{ProviderTabs, Scope, SearchState, TableSelection, session_matches_current_dir};
+use super::{CurrentDirMatcher, ProviderTabs, Scope, SearchState, TableSelection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionViewMode {
@@ -137,12 +137,13 @@ impl SessionsState {
 
         let selected_provider = self.provider_tabs.selected_provider().map(str::to_string);
         let query_terms = search_terms(self.search.query());
+        let current_dir_matcher = CurrentDirMatcher::new(&self.current_dir);
         let candidates = self
             .items
             .iter()
             .enumerate()
             .filter(|(_, session)| match self.scope {
-                Scope::CurrentDir => session_matches_current_dir(&session.cwd, &self.current_dir),
+                Scope::CurrentDir => current_dir_matcher.matches(&session.cwd),
                 Scope::All => true,
             })
             .filter(|(_, session)| {

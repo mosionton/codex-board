@@ -35,7 +35,7 @@ pub(crate) use runtime::run;
 pub(crate) use scroll::ScrollPosition;
 pub(crate) use search::SearchState;
 pub(crate) use selection::TableSelection;
-pub(crate) use session_paths::session_matches_current_dir;
+pub(crate) use session_paths::CurrentDirMatcher;
 pub(crate) use sessions_state::{SessionViewMode, SessionsState};
 pub(crate) use text_field::{TextField, char_count};
 

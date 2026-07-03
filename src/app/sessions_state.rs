@@ -137,14 +137,18 @@ impl SessionsState {
 
         let selected_provider = self.provider_tabs.selected_provider().map(str::to_string);
         let query_terms = search_terms(self.search.query());
-        let current_dir_matcher = CurrentDirMatcher::new(&self.current_dir);
+        let current_dir_matcher = match self.scope {
+            Scope::CurrentDir => Some(CurrentDirMatcher::new(&self.current_dir)),
+            Scope::All => None,
+        };
         let candidates = self
             .items
             .iter()
             .enumerate()
-            .filter(|(_, session)| match self.scope {
-                Scope::CurrentDir => current_dir_matcher.matches(&session.cwd),
-                Scope::All => true,
+            .filter(|(_, session)| {
+                current_dir_matcher
+                    .as_ref()
+                    .is_none_or(|matcher| matcher.matches(&session.cwd))
             })
             .filter(|(_, session)| {
                 selected_provider

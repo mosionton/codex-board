@@ -159,6 +159,7 @@ mod tests {
 
     fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
         Session {
+            kind: crate::session_store::SessionKind::Codex,
             id: id.to_string(),
             cwd,
             provider: provider.to_string(),
@@ -380,6 +381,7 @@ mod tests {
 
         let mut session =
             test_session("session-1", current_dir.clone(), "switcher", "summary text");
+        session.model = Some("gpt-5.5".to_string());
         session.thread_source = "subagent".to_string();
         session.parent_thread_id = Some("parent-1".to_string());
         session.agent_nickname = Some("Boole".to_string());
@@ -408,6 +410,8 @@ mod tests {
             .map(line_text)
             .collect::<Vec<_>>()
             .join("\n");
+        assert!(session_detail_text.contains("model"));
+        assert!(session_detail_text.contains("gpt-5.5"));
         assert!(session_detail_text.contains("source"));
         assert!(session_detail_text.contains("subagent"));
         assert!(session_detail_text.contains("parent"));

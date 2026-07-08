@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 pub mod app;
+pub mod claude_store;
 pub mod provider_config;
 pub mod session_store;
 pub mod ui;

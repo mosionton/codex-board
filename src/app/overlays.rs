@@ -73,7 +73,14 @@ impl App {
                 } else {
                     truncate_chars(&session.summary, 72)
                 };
-                Some(("Resume Session", format!("Resume session '{label}'?")))
+                let command = session.kind.resume_command_display(&session.id);
+                Some((
+                    "Resume Session",
+                    format!(
+                        "Resume session '{label}'?\n\n  {command}\n  in {}",
+                        session.cwd.display()
+                    ),
+                ))
             }
             ConfirmationAction::SaveProvider(id) => {
                 Some(("Save Provider", format!("Save provider '{id}'?")))

@@ -4,7 +4,7 @@
 [![Release](https://github.com/mosionton/codex-board/actions/workflows/release.yml/badge.svg)](https://github.com/mosionton/codex-board/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 
-`codex-board` 是 Codex CLI 的本地会话恢复面板。
+`codex-board` 是 Codex CLI 和 Claude Code 的本地会话恢复面板。
 
 它处理的主要场景是：同一个 workspace 里用过多个 provider 跑 Codex，会话记录里保存了各自的 provider，但当前 Codex 配置只会指向一个 provider。恢复旧会话前，需要先知道这条会话属于哪个 provider，并把 Codex 切回对应配置。
 
@@ -43,11 +43,24 @@ Codex 数据目录：
 - Unix/macOS 默认：`~/.codex`
 - Windows 默认：`%USERPROFILE%\.codex`
 
-会话读取自：
+Codex 会话读取自：
 
 ```text
 $CODEX_HOME/sessions
 ```
+
+Claude Code 数据目录：
+
+- 设置了 `CLAUDE_CONFIG_DIR`：使用 `CLAUDE_CONFIG_DIR`
+- 默认：`~/.claude`
+
+Claude Code 会话读取自：
+
+```text
+$CLAUDE_CONFIG_DIR/projects
+```
+
+Claude Code 会话在列表里的 provider 显示为 `claude`，可以像其他 provider 一样过滤。目录不存在时自动跳过。
 
 供应商配置保存在：
 
@@ -71,25 +84,31 @@ $CODEX_HOME/config.toml
 6. 选中同名 provider，按 `a` 应用到 Codex 配置。
 7. 回到 Sessions 页面，选中会话，按 `Enter` 恢复。
 
-恢复前会检查会话原工作目录是否存在。通过检查后执行：
+Claude Code 会话不需要切换 provider，直接选中按 `Enter` 恢复。
+
+恢复前会检查会话原工作目录是否存在。通过检查后按会话类型执行：
 
 ```sh
-codex resume <session_id>
+codex resume <session_id>    # Codex 会话
+claude --resume <session_id> # Claude Code 会话
 ```
 
 ## 功能
 
 ### 会话按 provider 和关系展示
 
-Sessions 页面显示当前目录或全部本地会话。默认按父子关系树形展示会话；`source` 列会用
-`●`、`├─`、`└─` 和 `│` 显示父子层级。表格包含时间、provider、来源、工作目录和摘要。
+Sessions 页面显示当前目录或全部本地会话，同时包含 Codex 和 Claude Code 两种来源。默认按父子关系树形展示会话；`source` 列会用
+`●`、`├─`、`└─` 和 `│` 显示父子层级。表格包含时间、agent（`codex` / `claude`）、provider、来源、工作目录和摘要。
+
+Claude Code 会话解析自 `~/.claude/projects` 下的 `.jsonl` 记录，跳过 subagent 侧链记录；
+对话查看、搜索、详情和恢复（`claude --resume`）与 Codex 会话一致。
 
 支持：
 
 - 当前目录和全部会话范围切换，当前目录范围会识别软连接等价路径。
 - 按 provider 过滤会话。
 - 在树形和平铺视图之间切换。
-- 搜索会话 id、provider、工作目录、摘要、时间和 subagent 关系信息。
+- 搜索会话 id、agent、provider、工作目录、摘要、时间和 subagent 关系信息。
 - 查看会话详情，包括 parent、agent、role 和 depth。
 - 打开会话对话。
 - 从会话原目录恢复。
@@ -107,6 +126,14 @@ Providers 页面维护可以应用到 Codex 的 provider。列表会标记当前
 - 从 provider `/models` 端点拉取模型列表。
 
 自定义 provider 会写入 Codex 的 `[model_providers]`。内置 `openai` 使用 Codex 保留配置，并清理自定义 provider 表。
+
+列表末尾会有一行只读的 `claude` 条目，展示本机 Claude Code 的状态：
+
+- 登录状态和 OAuth 账号（读取 `~/.claude.json` 的 `oauthAccount`）。
+- 默认模型（`settings.json` 的 `model` 或 `env.ANTHROPIC_MODEL`）。
+- 自定义 `ANTHROPIC_BASE_URL`（如果配置了代理网关）。
+
+这一行仅作展示，`a`/`e`/`d` 对它无效——Claude Code 的配置由它自己管理，codex-board 不会写入任何 Claude 配置文件。未安装 Claude Code 时不显示该行。
 
 ### 恢复前查看上下文
 

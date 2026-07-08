@@ -6,7 +6,8 @@ use ratatui::{
 
 use crate::{
     app::{App, SessionViewMode},
-    session_store::{Session, truncate_chars},
+    claude_store::ClaudeStatus,
+    session_store::{Session, SessionKind, truncate_chars},
 };
 
 use super::{details::provider_display_items, layout::centered_rect, layout::compact_path};
@@ -45,10 +46,14 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
                 app.session_state.visible_tree_prefix(index),
                 app.session_state.visible_parent_link(index),
             );
-            let provider_style = Style::default().fg(Color::Cyan);
+            let kind_style = match session.kind {
+                SessionKind::Codex => Style::default().fg(Color::Cyan),
+                SessionKind::Claude => Style::default().fg(Color::Magenta),
+            };
             Some(Row::new([
                 Cell::from(session.timestamp.as_str().to_string()),
-                Cell::from(session.provider.clone()).style(provider_style),
+                Cell::from(session.kind.agent_label()).style(kind_style),
+                Cell::from(session.provider.clone()).style(kind_style),
                 Cell::from(truncate_chars(&source, 24)),
                 Cell::from(compact_path(&session.cwd)),
                 Cell::from(truncate_chars(&session.summary, 96)),
@@ -60,6 +65,7 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
         rows,
         [
             Constraint::Length(25),
+            Constraint::Length(7),
             Constraint::Length(18),
             Constraint::Length(24),
             Constraint::Length(32),
@@ -67,7 +73,7 @@ pub(super) fn draw_sessions(frame: &mut ratatui::Frame<'_>, app: &mut App, area:
         ],
     )
     .header(
-        Row::new(["time", "provider", "source", "cwd", "summary"]).style(
+        Row::new(["time", "agent", "provider", "source", "cwd", "summary"]).style(
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -132,28 +138,35 @@ fn short_session_id(session_id: &str) -> String {
 
 pub(super) fn draw_providers(frame: &mut ratatui::Frame<'_>, app: &mut App, area: Rect) {
     let ids = app.provider_ids();
-    let rows = ids.iter().map(|id| {
-        let provider = app.providers.provider(id).expect("provider id exists");
-        let is_applied = app.providers.is_applied(id);
-        Row::new(
-            provider_display_items(id, provider, is_applied)
-                .into_iter()
-                .enumerate()
-                .map(|(index, (_, value))| {
-                    if index == 0 {
-                        Cell::from(value).style(Style::default().fg(Color::Cyan))
-                    } else if index == 1 && is_applied {
-                        Cell::from(value).style(
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD),
-                        )
-                    } else {
-                        Cell::from(value)
-                    }
-                }),
-        )
-    });
+    let mut rows = ids
+        .iter()
+        .map(|id| {
+            let provider = app.providers.provider(id).expect("provider id exists");
+            let is_applied = app.providers.is_applied(id);
+            Row::new(
+                provider_display_items(id, provider, is_applied)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (_, value))| {
+                        if index == 0 {
+                            Cell::from(value).style(Style::default().fg(Color::Cyan))
+                        } else if index == 1 && is_applied {
+                            Cell::from(value).style(
+                                Style::default()
+                                    .fg(Color::Green)
+                                    .add_modifier(Modifier::BOLD),
+                            )
+                        } else {
+                            Cell::from(value)
+                        }
+                    }),
+            )
+        })
+        .collect::<Vec<_>>();
+    let has_claude_row = app.providers.claude_status().is_some();
+    if let Some(status) = app.providers.claude_status() {
+        rows.push(claude_status_row(status));
+    }
 
     let table = Table::new(rows, PROVIDER_TABLE_WIDTHS)
         .header(
@@ -172,7 +185,7 @@ pub(super) fn draw_providers(frame: &mut ratatui::Frame<'_>, app: &mut App, area
 
     frame.render_stateful_widget(table, area, app.providers.selection_state_mut());
 
-    if ids.is_empty() {
+    if ids.is_empty() && !has_claude_row {
         let popup = centered_rect(58, 20, area);
         frame.render_widget(Clear, popup);
         frame.render_widget(
@@ -181,6 +194,34 @@ pub(super) fn draw_providers(frame: &mut ratatui::Frame<'_>, app: &mut App, area
             popup,
         );
     }
+}
+
+fn claude_status_row(status: &ClaudeStatus) -> Row<'static> {
+    let dash = || "-".to_string();
+    let login = if status.logged_in() {
+        Cell::from("login").style(
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Cell::from(dash())
+    };
+    Row::new([
+        Cell::from("claude").style(Style::default().fg(Color::Magenta)),
+        login,
+        Cell::from(status.model.clone().unwrap_or_else(dash)),
+        Cell::from(if status.logged_in() {
+            "oauth".to_string()
+        } else {
+            dash()
+        }),
+        Cell::from(status.base_url.clone().unwrap_or_else(dash)),
+        Cell::from(dash()),
+        Cell::from(dash()),
+        Cell::from(dash()),
+        Cell::from(dash()),
+    ])
 }
 
 #[cfg(test)]
@@ -193,6 +234,7 @@ mod tests {
 
     fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
         Session {
+            kind: crate::session_store::SessionKind::Codex,
             id: id.to_string(),
             cwd,
             provider: provider.to_string(),

@@ -10,8 +10,46 @@ use serde_json::Value as JsonValue;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use walkdir::WalkDir;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SessionKind {
+    Codex,
+    Claude,
+}
+
+impl SessionKind {
+    pub(super) const fn agent_label(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+        }
+    }
+
+    pub(super) const fn resume_program(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+        }
+    }
+
+    pub(super) const fn resume_args(self) -> &'static [&'static str] {
+        match self {
+            Self::Codex => &["resume"],
+            Self::Claude => &["--resume"],
+        }
+    }
+
+    pub(super) fn resume_command_display(self, session_id: &str) -> String {
+        format!(
+            "{} {} {session_id}",
+            self.resume_program(),
+            self.resume_args().join(" ")
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Session {
+    pub(super) kind: SessionKind,
     pub(super) id: String,
     pub(super) cwd: PathBuf,
     pub(super) provider: String,
@@ -53,7 +91,23 @@ pub(super) fn load_sessions(sessions_dir: &Path) -> Result<Vec<Session>> {
         }
     }
 
+    sort_sessions(&mut sessions);
+    Ok(sessions)
+}
+
+pub(super) fn sort_sessions(sessions: &mut [Session]) {
     sessions.sort_by_key(|session| Reverse(session.timestamp.clone()));
+}
+
+pub(super) fn load_all_sessions(
+    codex_sessions_dir: &Path,
+    claude_projects_dir: Option<&Path>,
+) -> Result<Vec<Session>> {
+    let mut sessions = load_sessions(codex_sessions_dir)?;
+    if let Some(claude_dir) = claude_projects_dir {
+        sessions.extend(crate::claude_store::load_claude_sessions(claude_dir)?);
+    }
+    sort_sessions(&mut sessions);
     Ok(sessions)
 }
 
@@ -176,6 +230,7 @@ impl ParsedSession {
         let summary = self.summary.unwrap_or_else(|| fallback_summary(path, &id));
 
         Some(Session {
+            kind: SessionKind::Codex,
             id,
             cwd,
             provider,
@@ -214,7 +269,17 @@ fn optional_string_from(
         .map(str::to_string)
 }
 
-pub(super) fn load_session_conversation(path: &Path) -> Result<Vec<ConversationEntry>> {
+pub(super) fn load_session_conversation(
+    path: &Path,
+    kind: SessionKind,
+) -> Result<Vec<ConversationEntry>> {
+    match kind {
+        SessionKind::Codex => load_codex_conversation(path),
+        SessionKind::Claude => crate::claude_store::load_claude_conversation(path),
+    }
+}
+
+fn load_codex_conversation(path: &Path) -> Result<Vec<ConversationEntry>> {
     let file = fs::File::open(path)
         .with_context(|| format!("failed to open session file {}", path.display()))?;
     let reader = io::BufReader::new(file);
@@ -263,6 +328,7 @@ pub(super) fn matches_search(session: &Session, terms: &[String]) -> bool {
 fn session_search_text(session: &Session) -> String {
     [
         session.id.as_str(),
+        session.kind.agent_label(),
         session.provider.as_str(),
         session.cwd.to_str().unwrap_or_default(),
         session.summary.as_str(),
@@ -505,7 +571,7 @@ mod tests {
         )
         .unwrap();
 
-        let entries = load_session_conversation(&path).unwrap();
+        let entries = load_session_conversation(&path, SessionKind::Codex).unwrap();
 
         assert_eq!(
             entries,
@@ -527,6 +593,7 @@ mod tests {
     #[test]
     fn search_matches_all_terms_across_fields() {
         let session = Session {
+            kind: SessionKind::Codex,
             id: "abc-123".into(),
             cwd: PathBuf::from("/repo/current"),
             provider: "switcher".into(),
@@ -545,11 +612,20 @@ mod tests {
         assert!(matches_search(&session, &search_terms("current tui")));
         assert!(!matches_search(&session, &search_terms("switcher missing")));
         assert!(matches_search(&session, &search_terms("   ")));
+        assert!(matches_search(&session, &search_terms("codex")));
+        assert!(!matches_search(&session, &search_terms("claude")));
+
+        let claude_session = Session {
+            kind: SessionKind::Claude,
+            ..session
+        };
+        assert!(matches_search(&claude_session, &search_terms("claude")));
     }
 
     #[test]
     fn search_matches_session_relationship_metadata() {
         let session = Session {
+            kind: SessionKind::Codex,
             id: "abc-123".into(),
             cwd: PathBuf::from("/repo/current"),
             provider: "switcher".into(),

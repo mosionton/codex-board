@@ -28,6 +28,7 @@ pub struct SessionsState {
     pub(super) scope: Scope,
     pub(super) current_dir: PathBuf,
     pub(super) sessions_dir: PathBuf,
+    pub(super) claude_projects_dir: Option<PathBuf>,
 }
 
 impl SessionsState {
@@ -46,7 +47,16 @@ impl SessionsState {
             scope: Scope::CurrentDir,
             current_dir,
             sessions_dir,
+            claude_projects_dir: None,
         }
+    }
+
+    pub(crate) fn set_claude_projects_dir(&mut self, dir: Option<PathBuf>) {
+        self.claude_projects_dir = dir;
+    }
+
+    pub(crate) fn claude_projects_dir(&self) -> Option<&Path> {
+        self.claude_projects_dir.as_deref()
     }
 
     pub(crate) fn items(&self) -> &[Session] {
@@ -395,6 +405,7 @@ mod tests {
 
     fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
         Session {
+            kind: crate::session_store::SessionKind::Codex,
             id: id.to_string(),
             cwd,
             provider: provider.to_string(),

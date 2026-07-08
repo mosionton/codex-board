@@ -38,22 +38,31 @@ impl App {
             .cloned()
     }
 
+    pub(crate) fn provider_row_count(&self) -> usize {
+        self.providers.registry.providers.len()
+            + usize::from(self.providers.claude_status.is_some())
+    }
+
+    pub(crate) fn is_claude_row_selected(&self) -> bool {
+        self.providers.claude_status.is_some()
+            && self.providers.selection.index() == self.providers.registry.providers.len()
+    }
+
     pub(crate) fn refresh_provider_selection(&mut self) {
-        self.providers
-            .selection
-            .sync_len(self.providers.registry.providers.len());
+        let row_count = self.provider_row_count();
+        self.providers.selection.sync_len(row_count);
     }
 
     pub(crate) fn move_provider_selection(&mut self, delta: isize) {
-        self.providers
-            .selection
-            .move_by(self.providers.registry.providers.len(), delta);
+        let row_count = self.provider_row_count();
+        self.providers.selection.move_by(row_count, delta);
     }
 
     pub(crate) fn page_provider_selection(&mut self, delta: isize) {
+        let row_count = self.provider_row_count();
         self.providers
             .selection
-            .move_by_clamped(self.providers.registry.providers.len(), delta * 10);
+            .move_by_clamped(row_count, delta * 10);
     }
 
     pub(crate) fn start_new_provider(&mut self) {
@@ -63,7 +72,18 @@ impl App {
         self.clear_status();
     }
 
+    fn reject_claude_row_action(&mut self) -> bool {
+        if self.is_claude_row_selected() {
+            self.show_status("claude is read-only; it is managed by Claude Code itself.");
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn start_edit_provider(&mut self) {
+        if self.reject_claude_row_action() {
+            return;
+        }
         let Some(id) = self.selected_provider_id() else {
             self.show_error("No provider selected.");
             return;
@@ -78,6 +98,9 @@ impl App {
     }
 
     pub(crate) fn prompt_delete_selected_provider(&mut self) {
+        if self.reject_claude_row_action() {
+            return;
+        }
         let Some(id) = self.selected_provider_id() else {
             self.show_error("No provider selected.");
             return;
@@ -98,6 +121,9 @@ impl App {
     }
 
     pub(crate) fn prompt_apply_selected_provider(&mut self) {
+        if self.reject_claude_row_action() {
+            return;
+        }
         let Some(id) = self.selected_provider_id() else {
             self.show_error("No provider selected.");
             return;

@@ -38,7 +38,8 @@ impl App {
             return;
         };
         let path = session.file.clone();
-        match load_session_conversation(&path) {
+        let kind = session.kind;
+        match load_session_conversation(&path, kind) {
             Ok(conversation) => {
                 self.conversation.replace_for_new_session(conversation);
                 self.overlay = Some(Overlay::Conversation);
@@ -56,7 +57,8 @@ impl App {
             return;
         };
         let path = session.file.clone();
-        match load_session_conversation(&path) {
+        let kind = session.kind;
+        match load_session_conversation(&path, kind) {
             Ok(conversation) => {
                 let count = conversation.len();
                 self.conversation.replace_preserving_filters(conversation);
@@ -93,6 +95,7 @@ mod tests {
 
     fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
         Session {
+            kind: crate::session_store::SessionKind::Codex,
             id: id.to_string(),
             cwd,
             provider: provider.to_string(),

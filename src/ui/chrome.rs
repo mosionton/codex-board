@@ -2,7 +2,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
 use crate::app::{App, Page, Scope, SessionViewMode};
@@ -169,17 +169,20 @@ pub(super) fn draw_confirmation_dialog(frame: &mut ratatui::Frame<'_>, app: &App
     };
 
     let popup = centered_rect(58, 22, area);
+    let mut lines = message
+        .lines()
+        .map(|line| Line::raw(line.to_string()))
+        .collect::<Vec<_>>();
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "Enter/y confirms. Esc/n cancels.",
+        Style::default().fg(Color::Gray),
+    ));
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        Paragraph::new(vec![
-            Line::raw(message),
-            Line::raw(""),
-            Line::styled(
-                "Enter/y confirms. Esc/n cancels.",
-                Style::default().fg(Color::Gray),
-            ),
-        ])
-        .block(Block::default().title(title).borders(Borders::ALL)),
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(Block::default().title(title).borders(Borders::ALL)),
         popup,
     );
 }

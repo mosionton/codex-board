@@ -129,6 +129,7 @@ mod tests {
 
     fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
         Session {
+            kind: crate::session_store::SessionKind::Codex,
             id: id.to_string(),
             cwd,
             provider: provider.to_string(),

@@ -188,6 +188,7 @@ mod tests {
 
     fn test_session(cwd: PathBuf) -> Session {
         Session {
+            kind: crate::session_store::SessionKind::Codex,
             id: "session-1".into(),
             cwd,
             provider: "switcher".into(),
@@ -246,6 +247,7 @@ mod tests {
         let current_dir = PathBuf::from("/repo/current");
         let sessions = vec![
             Session {
+                kind: crate::session_store::SessionKind::Codex,
                 id: "1".into(),
                 cwd: current_dir.clone(),
                 provider: "a".into(),
@@ -260,6 +262,7 @@ mod tests {
                 agent_depth: None,
             },
             Session {
+                kind: crate::session_store::SessionKind::Codex,
                 id: "2".into(),
                 cwd: PathBuf::from("/repo/other"),
                 provider: "b".into(),
@@ -312,6 +315,79 @@ mod tests {
                 .as_deref()
                 .is_some_and(|error| error.contains("session directory does not exist"))
         );
+    }
+
+    #[test]
+    fn claude_row_is_selectable_but_read_only() {
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig::new("https://api.example.test/v1", "responses"),
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            PathBuf::from("providers.toml"),
+            PathBuf::from("config.toml"),
+            PathBuf::from("sessions"),
+        );
+        app.providers
+            .set_claude_status(Some(crate::claude_store::ClaudeStatus {
+                email: Some("user@example.com".to_string()),
+                organization: None,
+                model: Some("claude-fable-5".to_string()),
+                base_url: None,
+            }));
+        app.refresh_provider_selection();
+
+        assert_eq!(app.provider_row_count(), 2);
+        assert!(!app.is_claude_row_selected());
+
+        app.move_provider_selection(1);
+        assert!(app.is_claude_row_selected());
+        assert_eq!(app.selected_provider_id(), None);
+
+        app.start_edit_provider();
+        assert_eq!(app.overlay, None);
+        assert!(app.status.contains("read-only"));
+
+        app.prompt_apply_selected_provider();
+        assert_eq!(app.confirmation, None);
+
+        app.prompt_delete_selected_provider();
+        assert_eq!(app.confirmation, None);
+    }
+
+    #[test]
+    fn resume_confirmation_shows_kind_specific_command() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path().join("project");
+        std::fs::create_dir(&session_dir).unwrap();
+        let mut codex_session = test_session(session_dir.clone());
+        codex_session.id = "codex-1".into();
+        codex_session.timestamp = "2026-06-23T01:00:00Z".into();
+        let mut claude_session = test_session(session_dir.clone());
+        claude_session.kind = crate::session_store::SessionKind::Claude;
+        claude_session.id = "claude-1".into();
+        let mut app = app_with_sessions_dir(
+            vec![codex_session, claude_session],
+            session_dir,
+            PathBuf::from("sessions"),
+        );
+
+        app.prompt_resume_selected_session();
+        let (_, message) = app.confirmation_dialog().unwrap();
+        assert!(message.contains("codex resume codex-1"));
+
+        app.close_overlay();
+        app.move_selection(1);
+        app.prompt_resume_selected_session();
+        let (_, message) = app.confirmation_dialog().unwrap();
+        assert!(message.contains("claude --resume claude-1"));
+        assert!(message.contains("project"));
     }
 
     #[test]

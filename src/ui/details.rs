@@ -7,6 +7,7 @@ use ratatui::{
 
 use crate::{
     app::{App, Page, provider_api_key_display, provider_auth_mode_display},
+    claude_store::ClaudeStatus,
     provider_config::{ProviderConfig, normalize_reasoning_effort},
 };
 
@@ -57,6 +58,10 @@ pub(super) fn selected_session_details(app: &App, width: usize) -> Vec<Line<'sta
         [
             ("time", session.timestamp.clone()),
             ("provider", session.provider.clone()),
+            (
+                "model",
+                session.model.clone().unwrap_or_else(|| "-".to_string()),
+            ),
             ("source", session.thread_source.clone()),
             (
                 "parent",
@@ -94,6 +99,12 @@ pub(super) fn selected_session_details(app: &App, width: usize) -> Vec<Line<'sta
 }
 
 pub(super) fn selected_provider_details(app: &App, width: usize) -> Vec<Line<'static>> {
+    if app.is_claude_row_selected() {
+        let Some(status) = app.providers.claude_status() else {
+            return vec![Line::raw("No provider selected.")];
+        };
+        return claude_status_details(status, width);
+    }
     let Some(id) = app.selected_provider_id() else {
         return vec![Line::raw("No provider selected.")];
     };
@@ -102,6 +113,35 @@ pub(super) fn selected_provider_details(app: &App, width: usize) -> Vec<Line<'st
     };
     let is_applied = app.providers.is_applied(&id);
     detail_lines(provider_display_items(&id, provider, is_applied), width)
+}
+
+fn claude_status_details(status: &ClaudeStatus, width: usize) -> Vec<Line<'static>> {
+    let dash = || "-".to_string();
+    detail_lines(
+        [
+            ("id", "claude".to_string()),
+            (
+                "status",
+                if status.logged_in() {
+                    "login".to_string()
+                } else {
+                    "not logged in".to_string()
+                },
+            ),
+            ("account", status.email.clone().unwrap_or_else(dash)),
+            (
+                "organization",
+                status.organization.clone().unwrap_or_else(dash),
+            ),
+            ("model", status.model.clone().unwrap_or_else(dash)),
+            ("base_url", status.base_url.clone().unwrap_or_else(dash)),
+            (
+                "note",
+                "read-only; managed by Claude Code itself".to_string(),
+            ),
+        ],
+        width,
+    )
 }
 
 pub(super) fn provider_display_items(

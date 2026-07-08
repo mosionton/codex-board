@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::{
     provider_config::{self, ProviderRegistry},
-    session_store::load_sessions,
+    session_store::{Session, load_all_sessions},
     ui,
 };
 
@@ -28,7 +28,9 @@ pub fn run() -> Result<()> {
     let applied_provider_id = provider_config::load_applied_model_provider(&codex_config_path)?;
 
     let sessions_dir = codex_home.join("sessions");
-    let sessions = load_sessions(&sessions_dir)?;
+    let claude_config_dir = claude_config_dir();
+    let claude_projects_dir = claude_config_dir.as_ref().map(|dir| dir.join("projects"));
+    let sessions = load_all_sessions(&sessions_dir, claude_projects_dir.as_deref())?;
     let mut app = App::new(
         sessions,
         current_dir,
@@ -37,13 +39,29 @@ pub fn run() -> Result<()> {
         codex_config_path,
         sessions_dir,
     );
+    app.session_state
+        .set_claude_projects_dir(claude_projects_dir);
+    app.providers.set_claude_status(
+        claude_config_dir
+            .as_deref()
+            .and_then(crate::claude_store::load_claude_status),
+    );
+    app.refresh_provider_selection();
     app.providers.applied_provider_id = applied_provider_id;
     let action = ui::run_tui(&mut app)?;
 
     match action {
         AppAction::Quit => Ok(()),
-        AppAction::Resume(session) => exec_codex_resume(&session.id, &session.cwd),
+        AppAction::Resume(session) => exec_session_resume(&session),
     }
+}
+
+fn claude_config_dir() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("CLAUDE_CONFIG_DIR") {
+        return Some(PathBuf::from(path));
+    }
+    let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
+    Some(PathBuf::from(home).join(".claude"))
 }
 
 fn codex_home() -> Result<PathBuf> {
@@ -68,17 +86,32 @@ fn codex_home() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".codex"))
 }
 
+pub(super) fn exec_session_resume(session: &Session) -> Result<()> {
+    exec_resume_command(
+        session.kind.resume_program(),
+        session.kind.resume_args(),
+        &session.id,
+        &session.cwd,
+    )
+}
+
+#[cfg(test)]
 pub(super) fn exec_codex_resume(session_id: &str, cwd: &Path) -> Result<()> {
+    exec_resume_command("codex", &["resume"], session_id, cwd)
+}
+
+fn exec_resume_command(program: &str, args: &[&str], session_id: &str, cwd: &Path) -> Result<()> {
     ensure_session_cwd_exists(cwd)?;
 
-    let status = Command::new("codex")
+    let status = Command::new(program)
         .current_dir(cwd)
-        .arg("resume")
+        .args(args)
         .arg(session_id)
         .status()
         .with_context(|| {
             format!(
-                "failed to start `codex resume {session_id}` in {}",
+                "failed to start `{program} {} {session_id}` in {}",
+                args.join(" "),
                 cwd.display()
             )
         })?;
@@ -86,7 +119,7 @@ pub(super) fn exec_codex_resume(session_id: &str, cwd: &Path) -> Result<()> {
     if status.success() {
         Ok(())
     } else {
-        anyhow::bail!("codex exited with status {status}");
+        anyhow::bail!("{program} exited with status {status}");
     }
 }
 

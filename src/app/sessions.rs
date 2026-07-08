@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
-use crate::session_store::{Session, load_sessions};
+use crate::session_store::{Session, load_all_sessions};
 
 use super::{App, ConfirmationAction, Overlay, ensure_session_cwd_exists};
 
@@ -25,7 +25,14 @@ impl App {
         let selected_id = self.selected_session().map(|session| session.id.clone());
         let selected_provider = self.session_state.selected_provider_label_owned();
 
-        match load_sessions(self.session_state.sessions_dir()) {
+        let claude_projects_dir = self
+            .session_state
+            .claude_projects_dir()
+            .map(Path::to_path_buf);
+        match load_all_sessions(
+            self.session_state.sessions_dir(),
+            claude_projects_dir.as_deref(),
+        ) {
             Ok(sessions) => {
                 self.session_state.replace_items(sessions);
                 self.session_state
@@ -100,6 +107,7 @@ mod tests {
 
     fn test_session(id: &str, cwd: PathBuf, provider: &str, summary: &str) -> Session {
         Session {
+            kind: crate::session_store::SessionKind::Codex,
             id: id.to_string(),
             cwd,
             provider: provider.to_string(),

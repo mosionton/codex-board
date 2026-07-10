@@ -20,6 +20,7 @@ pub fn run() -> Result<()> {
     let provider_config_path = provider_config::config_path(&codex_home);
     let codex_config_path = provider_config::codex_config_path(&codex_home);
     let codex_auth_path = provider_config::codex_auth_path(&codex_home);
+    let model_catalog_load = provider_config::ModelCatalog::load_bundled();
     let mut provider_registry = ProviderRegistry::load(&provider_config_path)?;
     provider_registry.merge_defaults(provider_config::load_codex_config_providers(
         &codex_config_path,
@@ -46,6 +47,10 @@ pub fn run() -> Result<()> {
             .as_deref()
             .and_then(crate::claude_store::load_claude_status),
     );
+    app.providers.set_model_catalog(model_catalog_load.catalog);
+    if let Some(warning) = model_catalog_load.warning {
+        app.show_status(warning);
+    }
     app.refresh_provider_selection();
     app.providers.applied_provider_id = applied_provider_id;
     let action = ui::run_tui(&mut app)?;

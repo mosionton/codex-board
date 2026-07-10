@@ -35,6 +35,13 @@ pub(super) fn handle_provider_editor_key(app: &mut App, key: KeyEvent) {
                     }
                 }
 
+                if matches!(key.code, KeyCode::Char('u'))
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    editor.clear_active_field();
+                    return;
+                }
+
                 if let Some(input) = editor.active_text_mut() {
                     handle_text_input_key(input, key);
                     return;
@@ -46,11 +53,6 @@ pub(super) fn handle_provider_editor_key(app: &mut App, key: KeyEvent) {
                     }
                     (KeyCode::Right, _) => {
                         editor.cycle_active_option(1);
-                    }
-                    (KeyCode::Char('u'), modifiers)
-                        if modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
-                        editor.clear_active_field();
                     }
                     _ => {}
                 }

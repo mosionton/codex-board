@@ -49,10 +49,6 @@ impl ProvidersState {
         self.claude_status.as_ref()
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "consumed by the model-aware provider import flow")
-    )]
     pub(crate) fn model_catalog(&self) -> Arc<ModelCatalog> {
         Arc::clone(&self.model_catalog)
     }

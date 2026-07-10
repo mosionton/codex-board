@@ -1,7 +1,6 @@
-use crate::provider_config::{
-    DEFAULT_REASONING_EFFORT, PLAN_REASONING_EFFORT_OPTIONS, ProviderAuthMode, ProviderConfig,
-    REASONING_EFFORT_OPTIONS, normalize_reasoning_effort,
-};
+use std::sync::Arc;
+
+use crate::provider_config::{ModelCatalog, ProviderAuthMode, ProviderConfig, ReasoningProfile};
 
 use super::{TextField, cycle_index};
 
@@ -24,34 +23,70 @@ pub struct ProviderEditor {
     pub model: TextField,
     pub model_options: Vec<String>,
     pub reasoning_effort: String,
+    pub reasoning_effort_options: Vec<String>,
     pub plan_reasoning_effort: String,
+    pub plan_reasoning_effort_options: Vec<String>,
     pub api_key: TextField,
     pub base_url: TextField,
     pub wire_api: String,
     pub auth_mode: ProviderAuthMode,
+    model_catalog: Arc<ModelCatalog>,
+    reasoning_effort_explicit: bool,
+    plan_reasoning_effort_explicit: bool,
 }
 
 pub const WIRE_API_OPTIONS: &[&str] = &["responses", "chat"];
 
 impl ProviderEditor {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "kept as a compatibility constructor")
+    )]
     pub fn new() -> Self {
+        Self::new_with_catalog(Arc::new(ModelCatalog::default()))
+    }
+
+    pub fn new_with_catalog(model_catalog: Arc<ModelCatalog>) -> Self {
+        let profile = model_catalog.profile_for(None);
         Self {
             original_id: None,
             active_field: ProviderField::Id,
             id: TextField::empty(),
             model: TextField::empty(),
             model_options: Vec::new(),
-            reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
-            plan_reasoning_effort: DEFAULT_REASONING_EFFORT.to_string(),
+            reasoning_effort: profile.default_effort().to_string(),
+            reasoning_effort_options: profile.supported_efforts().to_vec(),
+            plan_reasoning_effort: profile.default_effort().to_string(),
+            plan_reasoning_effort_options: profile.supported_efforts().to_vec(),
             api_key: TextField::empty(),
             base_url: TextField::empty(),
             wire_api: "responses".to_string(),
             auth_mode: ProviderAuthMode::ApiKey,
+            model_catalog,
+            reasoning_effort_explicit: false,
+            plan_reasoning_effort_explicit: false,
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "kept as a compatibility constructor")
+    )]
     pub fn from_provider(id: &str, provider: &ProviderConfig) -> Self {
+        Self::from_provider_with_catalog(id, provider, Arc::new(ModelCatalog::default()))
+    }
+
+    pub fn from_provider_with_catalog(
+        id: &str,
+        provider: &ProviderConfig,
+        model_catalog: Arc<ModelCatalog>,
+    ) -> Self {
         let model = provider.model.clone().unwrap_or_default();
+        let profile = model_catalog.profile_for(Some(&model));
+        let (reasoning_effort, reasoning_effort_explicit) =
+            initial_effort(profile, provider.reasoning_effort.as_deref());
+        let (plan_reasoning_effort, plan_reasoning_effort_explicit) =
+            initial_effort(profile, provider.plan_reasoning_effort.as_deref());
         let api_key = if provider.auth_mode.requires_openai_auth() {
             String::new()
         } else {
@@ -64,34 +99,43 @@ impl ProviderEditor {
             id: TextField::new(id),
             model: TextField::new(model),
             model_options: Vec::new(),
-            reasoning_effort: normalize_reasoning_effort(provider.reasoning_effort.as_deref())
-                .to_string(),
-            plan_reasoning_effort: normalize_reasoning_effort(
-                provider.plan_reasoning_effort.as_deref(),
-            )
-            .to_string(),
+            reasoning_effort,
+            reasoning_effort_options: profile.supported_efforts().to_vec(),
+            plan_reasoning_effort,
+            plan_reasoning_effort_options: profile.supported_efforts().to_vec(),
             api_key: TextField::new(api_key),
             base_url: TextField::new(base_url),
             wire_api: provider.wire_api.clone(),
             auth_mode: provider.auth_mode,
+            model_catalog,
+            reasoning_effort_explicit,
+            plan_reasoning_effort_explicit,
         }
     }
 
-    pub const fn next_field(&mut self) {
+    pub fn next_field(&mut self) {
+        let old_field = self.active_field;
         loop {
             self.active_field = self.active_field.next();
             if self.is_editable_field(self.active_field) {
                 break;
             }
         }
+        if old_field == ProviderField::Model {
+            self.commit_model_change();
+        }
     }
 
-    pub const fn previous_field(&mut self) {
+    pub fn previous_field(&mut self) {
+        let old_field = self.active_field;
         loop {
             self.active_field = self.active_field.previous();
             if self.is_editable_field(self.active_field) {
                 break;
             }
+        }
+        if old_field == ProviderField::Model {
+            self.commit_model_change();
         }
     }
 
@@ -115,12 +159,17 @@ impl ProviderEditor {
             }
             ProviderField::Model => {
                 self.model.clear();
+                self.commit_model_change();
             }
             ProviderField::ReasoningEffort => {
-                self.reasoning_effort = DEFAULT_REASONING_EFFORT.to_string();
+                let profile = self.model_catalog.profile_for(Some(self.model.as_str()));
+                self.reasoning_effort = profile.default_effort().to_string();
+                self.reasoning_effort_explicit = false;
             }
             ProviderField::PlanReasoningEffort => {
-                self.plan_reasoning_effort = DEFAULT_REASONING_EFFORT.to_string();
+                let profile = self.model_catalog.profile_for(Some(self.model.as_str()));
+                self.plan_reasoning_effort = profile.default_effort().to_string();
+                self.plan_reasoning_effort_explicit = false;
             }
             ProviderField::ApiKey => {
                 self.api_key.clear();
@@ -165,6 +214,7 @@ impl ProviderEditor {
             self.model.move_cursor_to_end();
         }
         self.active_field = ProviderField::Model;
+        self.commit_model_change();
     }
 
     pub fn cycle_model_option(&mut self, delta: isize) -> bool {
@@ -178,7 +228,25 @@ impl ProviderEditor {
             .unwrap_or(0);
         let next = cycle_index(current, self.model_options.len(), delta);
         self.model.set(self.model_options[next].clone());
+        self.commit_model_change();
         true
+    }
+
+    pub fn commit_model_change(&mut self) {
+        let profile = self
+            .model_catalog
+            .profile_for(Some(self.model.as_str()))
+            .clone();
+        self.reasoning_effort_options = profile.supported_efforts().to_vec();
+        self.plan_reasoning_effort_options = profile.supported_efforts().to_vec();
+        if !self.reasoning_effort_explicit || !profile.supports(&self.reasoning_effort) {
+            self.reasoning_effort = profile.default_effort().to_string();
+            self.reasoning_effort_explicit = false;
+        }
+        if !self.plan_reasoning_effort_explicit || !profile.supports(&self.plan_reasoning_effort) {
+            self.plan_reasoning_effort = profile.default_effort().to_string();
+            self.plan_reasoning_effort_explicit = false;
+        }
     }
 
     pub const fn text_cursor_for(&self, field: ProviderField) -> Option<usize> {
@@ -197,13 +265,23 @@ impl ProviderEditor {
     pub fn cycle_active_option(&mut self, delta: isize) -> bool {
         match self.active_field {
             ProviderField::ReasoningEffort => {
-                cycle_string_option(&mut self.reasoning_effort, REASONING_EFFORT_OPTIONS, delta)
+                let cycled = cycle_owned_string_option(
+                    &mut self.reasoning_effort,
+                    &self.reasoning_effort_options,
+                    delta,
+                );
+                self.reasoning_effort_explicit |= cycled;
+                cycled
             }
-            ProviderField::PlanReasoningEffort => cycle_string_option(
-                &mut self.plan_reasoning_effort,
-                PLAN_REASONING_EFFORT_OPTIONS,
-                delta,
-            ),
+            ProviderField::PlanReasoningEffort => {
+                let cycled = cycle_owned_string_option(
+                    &mut self.plan_reasoning_effort,
+                    &self.plan_reasoning_effort_options,
+                    delta,
+                );
+                self.plan_reasoning_effort_explicit |= cycled;
+                cycled
+            }
             ProviderField::WireApi => {
                 cycle_string_option(&mut self.wire_api, WIRE_API_OPTIONS, delta)
             }
@@ -278,6 +356,17 @@ fn default_wire_api() -> &'static str {
     WIRE_API_OPTIONS[0]
 }
 
+#[expect(
+    clippy::option_if_let_else,
+    reason = "the branches make explicit-choice state directly auditable"
+)]
+fn initial_effort(profile: &ReasoningProfile, value: Option<&str>) -> (String, bool) {
+    match value.map(str::trim).filter(|value| profile.supports(value)) {
+        Some(value) => (value.to_string(), true),
+        None => (profile.default_effort().to_string(), false),
+    }
+}
+
 fn cycle_string_option(current: &mut String, options: &[&str], delta: isize) -> bool {
     if options.is_empty() {
         return false;
@@ -292,9 +381,40 @@ fn cycle_string_option(current: &mut String, options: &[&str], delta: isize) -> 
     true
 }
 
+fn cycle_owned_string_option(current: &mut String, options: &[String], delta: isize) -> bool {
+    if options.is_empty() {
+        return false;
+    }
+
+    let index = options
+        .iter()
+        .position(|option| option == current)
+        .unwrap_or(0);
+    let next = cycle_index(index, options.len(), delta);
+    current.clone_from(&options[next]);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    use crate::provider_config::{DEFAULT_REASONING_EFFORT, ModelCatalog};
+
+    fn gpt_5_6_catalog() -> Arc<ModelCatalog> {
+        Arc::new(
+            ModelCatalog::from_json(
+                r#"{"models":[
+                  {"slug":"gpt-5.5","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"}]},
+                  {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+                  {"slug":"gpt-5.6-terra","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+                  {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+                ]}"#,
+            )
+            .unwrap(),
+        )
+    }
 
     fn api_key_provider() -> ProviderConfig {
         ProviderConfig {
@@ -307,6 +427,51 @@ mod tests {
             wire_api: "responses".to_string(),
             auth_mode: ProviderAuthMode::ApiKey,
         }
+    }
+
+    #[test]
+    fn new_editor_uses_selected_model_default() {
+        let mut editor = ProviderEditor::new_with_catalog(gpt_5_6_catalog());
+        editor.model.set("gpt-5.6-sol");
+        editor.commit_model_change();
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "low");
+        assert_eq!(
+            editor.reasoning_effort_options,
+            ["low", "medium", "high", "xhigh", "max", "ultra"]
+        );
+    }
+
+    #[test]
+    fn preserves_supported_explicit_effort_and_replaces_unsupported_effort() {
+        let provider = ProviderConfig {
+            model: Some("gpt-5.6-sol".to_string()),
+            reasoning_effort: Some("xhigh".to_string()),
+            plan_reasoning_effort: Some("ultra".to_string()),
+            api_key: Some("sk-test".to_string()),
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+        let mut editor =
+            ProviderEditor::from_provider_with_catalog("switcher", &provider, gpt_5_6_catalog());
+        editor.model.set("gpt-5.6-luna");
+        editor.commit_model_change();
+        assert_eq!(editor.reasoning_effort, "xhigh");
+        assert_eq!(editor.plan_reasoning_effort, "medium");
+    }
+
+    #[test]
+    fn clearing_reasoning_restores_current_model_default() {
+        let mut editor = ProviderEditor::new_with_catalog(gpt_5_6_catalog());
+        editor.model.set("gpt-5.6-sol");
+        editor.commit_model_change();
+        editor.active_field = ProviderField::ReasoningEffort;
+        assert!(editor.cycle_active_option(1));
+        assert_eq!(editor.reasoning_effort, "medium");
+        editor.clear_active_field();
+        assert_eq!(editor.reasoning_effort, "low");
     }
 
     #[test]

@@ -67,7 +67,8 @@ impl App {
 
     pub(crate) fn start_new_provider(&mut self) {
         self.providers.model_fetch_task = None;
-        self.providers.editor = Some(ProviderEditor::new());
+        let model_catalog = self.providers.model_catalog();
+        self.providers.editor = Some(ProviderEditor::new_with_catalog(model_catalog));
         self.overlay = Some(Overlay::ProviderEditor);
         self.clear_status();
     }
@@ -92,7 +93,12 @@ impl App {
             return;
         };
         self.providers.model_fetch_task = None;
-        self.providers.editor = Some(ProviderEditor::from_provider(&id, provider));
+        let model_catalog = self.providers.model_catalog();
+        self.providers.editor = Some(ProviderEditor::from_provider_with_catalog(
+            &id,
+            provider,
+            model_catalog,
+        ));
         self.overlay = Some(Overlay::ProviderEditor);
         self.clear_status();
     }
@@ -134,6 +140,9 @@ impl App {
     }
 
     pub(crate) fn prompt_save_provider_editor(&mut self) {
+        if let Some(editor) = self.providers.editor.as_mut() {
+            editor.commit_model_change();
+        }
         let Some(editor) = self.providers.editor.as_ref() else {
             return;
         };
@@ -322,7 +331,7 @@ mod tests {
     use super::*;
     use std::{path::PathBuf, sync::mpsc};
 
-    use crate::provider_config::{ProviderAuthMode, ProviderRegistry};
+    use crate::provider_config::{ModelCatalog, ProviderAuthMode, ProviderRegistry};
     use tempfile::tempdir;
 
     fn test_provider() -> ProviderConfig {
@@ -336,6 +345,69 @@ mod tests {
             wire_api: "responses".to_string(),
             auth_mode: ProviderAuthMode::ApiKey,
         }
+    }
+
+    fn model_catalog() -> ModelCatalog {
+        ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]}
+            ]}"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn provider_editors_use_shared_model_catalog() {
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: Some("gpt-5.6-sol".to_string()),
+                    reasoning_effort: None,
+                    plan_reasoning_effort: None,
+                    ..test_provider()
+                },
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            PathBuf::from("providers.toml"),
+            PathBuf::from("config.toml"),
+            PathBuf::from("sessions"),
+        );
+        app.providers.set_model_catalog(model_catalog());
+
+        app.start_edit_provider();
+
+        let editor = app.providers.editor().unwrap();
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "low");
+    }
+
+    #[test]
+    fn prompting_save_commits_manually_entered_model() {
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            ProviderRegistry::default(),
+            PathBuf::from("providers.toml"),
+            PathBuf::from("config.toml"),
+            PathBuf::from("sessions"),
+        );
+        app.providers.set_model_catalog(model_catalog());
+        app.start_new_provider();
+        let editor = app.providers.editor_mut().unwrap();
+        editor.id.set("switcher");
+        editor.model.set("gpt-5.6-sol");
+
+        app.prompt_save_provider_editor();
+
+        let editor = app.providers.editor().unwrap();
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "low");
     }
 
     fn app_with_provider_count(count: usize) -> App {

@@ -66,14 +66,14 @@ pub(super) fn event_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::{path::PathBuf, sync::Arc};
 
     use crate::{
         app::{
             ConfirmationAction, ConversationRoleFilter, Overlay, ProviderEditor, ProviderField,
             SessionViewMode,
         },
-        provider_config::{ProviderConfig, ProviderRegistry},
+        provider_config::{ModelCatalog, ProviderAuthMode, ProviderConfig, ProviderRegistry},
         session_store::Session,
     };
     use tempfile::tempdir;
@@ -465,6 +465,50 @@ mod tests {
         editor.model_options = vec!["gpt-5-mini".to_string(), "gpt-5.5".to_string()];
         handle_provider_editor_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         assert_eq!(app.providers.editor().unwrap().model.as_str(), "gpt-5.5");
+
+        let catalog = ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+              {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+            ]}"#,
+        )
+        .unwrap();
+        let provider = ProviderConfig {
+            model: Some("gpt-5.6-sol".to_string()),
+            reasoning_effort: Some("ultra".to_string()),
+            plan_reasoning_effort: Some("max".to_string()),
+            api_key: Some("sk-test".to_string()),
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+        let mut editor =
+            ProviderEditor::from_provider_with_catalog("switcher", &provider, Arc::new(catalog));
+        editor.active_field = ProviderField::Model;
+        editor.model_options = vec!["gpt-5.6-sol".to_string(), "gpt-5.6-luna".to_string()];
+        app.providers.set_editor(Some(editor));
+
+        handle_provider_editor_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+
+        let editor = app.providers.editor().unwrap();
+        assert_eq!(editor.model.as_str(), "gpt-5.6-luna");
+        assert_eq!(editor.reasoning_effort, "medium");
+        assert_eq!(editor.plan_reasoning_effort, "max");
+
+        let editor = app.providers.editor_mut().unwrap();
+        editor.active_field = ProviderField::Model;
+        handle_provider_editor_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        );
+        let editor = app.providers.editor().unwrap();
+        assert_eq!(editor.model.as_str(), "");
+        assert_eq!(editor.reasoning_effort, "medium");
+        assert_eq!(
+            editor.reasoning_effort_options,
+            ["low", "medium", "high", "xhigh"]
+        );
 
         let editor = app.providers.editor_mut().unwrap();
         editor.active_field = ProviderField::BaseUrl;

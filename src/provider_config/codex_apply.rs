@@ -78,6 +78,10 @@ fn write_codex_config(
         model_catalog.normalize_effort(effective_model, provider.reasoning_effort.as_deref());
     let plan_reasoning_effort =
         model_catalog.normalize_effort(effective_model, provider.plan_reasoning_effort.as_deref());
+    let auto_compact_token_limit =
+        model_catalog.auto_compact_token_limit(effective_model, provider.auto_compact_percent);
+    let auto_compact_token_limit = i64::try_from(auto_compact_token_limit)
+        .context("auto compact token limit exceeds Codex TOML integer range")?;
 
     doc["model_provider"] = value(id);
     if let Some(model) = provider_model {
@@ -85,6 +89,8 @@ fn write_codex_config(
     }
     doc["model_reasoning_effort"] = value(reasoning_effort);
     doc["plan_mode_reasoning_effort"] = value(plan_reasoning_effort);
+    doc["model_auto_compact_token_limit"] = value(auto_compact_token_limit);
+    doc["model_auto_compact_token_limit_scope"] = value("total");
 
     if id == OPENAI_PROVIDER_ID {
         remove_model_providers_table(&mut doc)?;
@@ -182,8 +188,8 @@ mod tests {
     fn gpt_5_6_catalog() -> ModelCatalog {
         ModelCatalog::from_json(
             r#"{"models":[
-              {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
-              {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+              {"slug":"gpt-5.6-sol","context_window":372000,"default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+              {"slug":"gpt-5.6-luna","context_window":372000,"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
             ]}"#,
         )
         .unwrap()
@@ -447,6 +453,16 @@ wire_api = "responses"
             doc.get("model").and_then(toml::Value::as_str),
             Some("gpt-5.5")
         );
+        assert!(
+            doc.get("model_auto_compact_token_limit")
+                .and_then(toml::Value::as_integer)
+                .is_some()
+        );
+        assert_eq!(
+            doc.get("model_auto_compact_token_limit_scope")
+                .and_then(toml::Value::as_str),
+            Some("total")
+        );
         assert!(doc.get("model_providers").is_none());
     }
 
@@ -683,5 +699,81 @@ wire_api = "responses"
         assert!(text.contains("model = \"gpt-5.6-sol\""));
         assert!(text.contains("model_reasoning_effort = \"ultra\""));
         assert!(text.contains("plan_mode_reasoning_effort = \"max\""));
+    }
+
+    #[test]
+    fn writes_auto_compact_limit_from_model_context_window() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(&config_path, "service_tier = \"default\"\n").unwrap();
+        let provider = ProviderConfig {
+            model: Some("gpt-5.6-sol".to_string()),
+            reasoning_effort: Some("low".to_string()),
+            plan_reasoning_effort: Some("low".to_string()),
+            auto_compact_percent: 70,
+            api_key: Some("sk-test".to_string()),
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+
+        apply_provider_to_codex("switcher", &provider, &config_path, &gpt_5_6_catalog()).unwrap();
+
+        let config = fs::read_to_string(config_path).unwrap();
+        let doc = toml::from_str::<toml::Value>(&config).unwrap();
+        assert_eq!(
+            doc.get("model_auto_compact_token_limit")
+                .and_then(toml::Value::as_integer),
+            Some(260_400)
+        );
+        assert_eq!(
+            doc.get("model_auto_compact_token_limit_scope")
+                .and_then(toml::Value::as_str),
+            Some("total")
+        );
+        assert_eq!(
+            doc.get("service_tier").and_then(toml::Value::as_str),
+            Some("default")
+        );
+    }
+
+    #[test]
+    fn unknown_model_uses_compatibility_auto_compact_limit() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let mut provider =
+            ProviderConfig::new("https://example.test/v1", "responses").with_model("custom-model");
+        provider.api_key = Some("sk-test".to_string());
+
+        apply_with_default_catalog("switcher", &provider, &config_path).unwrap();
+
+        let config = fs::read_to_string(config_path).unwrap();
+        let doc = toml::from_str::<toml::Value>(&config).unwrap();
+        assert_eq!(
+            doc.get("model_auto_compact_token_limit")
+                .and_then(toml::Value::as_integer),
+            Some(190_400)
+        );
+    }
+
+    #[test]
+    fn empty_provider_model_uses_existing_model_for_auto_compact_limit() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(&config_path, "model = \"gpt-5.6-sol\"\n").unwrap();
+        let mut provider = ProviderConfig::new("https://example.test/v1", "responses");
+        provider.auto_compact_percent = 69;
+        provider.api_key = Some("sk-test".to_string());
+
+        apply_provider_to_codex("switcher", &provider, &config_path, &gpt_5_6_catalog()).unwrap();
+
+        let config = fs::read_to_string(config_path).unwrap();
+        let doc = toml::from_str::<toml::Value>(&config).unwrap();
+        assert_eq!(
+            doc.get("model_auto_compact_token_limit")
+                .and_then(toml::Value::as_integer),
+            Some(256_680)
+        );
     }
 }

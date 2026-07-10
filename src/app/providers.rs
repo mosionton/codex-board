@@ -638,6 +638,8 @@ mod tests {
             dir.path().join("config.toml"),
             dir.path().join("sessions"),
         );
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
 
         app.apply_provider("switcher");
 
@@ -645,6 +647,49 @@ mod tests {
             app.providers.applied_provider_id.as_deref(),
             Some("switcher")
         );
+        assert_eq!(app.providers.current_codex_model(), Some("gpt-5.5"));
         assert_eq!(app.status, "Applied provider 'switcher' to Codex config.");
+    }
+
+    #[test]
+    fn apply_provider_with_empty_model_preserves_current_codex_model() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(&config_path, "model = \"gpt-5.6-sol\"\n").unwrap();
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: None,
+                    reasoning_effort: Some("ultra".to_string()),
+                    plan_reasoning_effort: Some("max".to_string()),
+                    api_key: Some("sk-test".to_string()),
+                    env_key: None,
+                    base_url: "https://api.example.test/v1".to_string(),
+                    wire_api: "responses".to_string(),
+                    auth_mode: ProviderAuthMode::ApiKey,
+                },
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            dir.path().join("providers.toml"),
+            config_path,
+            dir.path().join("sessions"),
+        );
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
+        app.providers.set_model_catalog(model_catalog());
+
+        app.apply_provider("switcher");
+
+        assert_eq!(app.providers.current_codex_model(), Some("gpt-5.6-sol"));
+        assert_eq!(
+            app.providers.applied_provider_id.as_deref(),
+            Some("switcher")
+        );
     }
 }

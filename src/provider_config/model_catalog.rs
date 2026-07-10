@@ -271,6 +271,25 @@ mod tests {
     }
 
     #[test]
+    fn rejects_non_empty_catalog_when_every_entry_is_invalid() {
+        let error = ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"missing-default","supported_reasoning_levels":[{"effort":"medium"}]},
+              {"slug":"wrong-type","default_reasoning_level":7,"supported_reasoning_levels":"medium"},
+              {"slug":"","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]},
+              {"slug":"unsupported-default","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"}]}
+            ]}"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("Codex model catalog contains no valid models")
+        );
+    }
+
+    #[test]
     fn command_failures_return_warning_and_fallback_catalog() {
         let loaded = ModelCatalog::from_command_result(false, b"");
         assert!(loaded.warning.is_some());

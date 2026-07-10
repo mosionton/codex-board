@@ -288,4 +288,3 @@ README 的 provider 配置说明改为：
 - 未知模型和模型目录加载失败时仍可编辑、保存和应用 provider。
 - UI、详情页、导入逻辑和最终 Codex TOML 对同一组合给出一致结果。
 - 所有测试、格式检查和 CI Clippy 配置通过。
-

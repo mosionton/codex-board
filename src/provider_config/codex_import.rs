@@ -23,6 +23,10 @@ struct CodexConfig {
     #[serde(default)]
     plan_mode_reasoning_effort: Option<String>,
     #[serde(default)]
+    model_auto_compact_token_limit: Option<toml::Value>,
+    #[serde(default)]
+    model_auto_compact_token_limit_scope: Option<toml::Value>,
+    #[serde(default)]
     model_providers: BTreeMap<String, CodexProviderConfig>,
 }
 
@@ -88,6 +92,7 @@ pub fn load_codex_config_providers(
 
     let mut registry = ProviderRegistry::default();
     if let Some(codex_config) = codex_config {
+        let auto_compact_percent = imported_auto_compact_percent(&codex_config, model_catalog);
         let model = codex_config.model.clone();
         let reasoning_effort = explicit_supported_effort(
             model_catalog,
@@ -109,6 +114,7 @@ pub fn load_codex_config_providers(
                     model.clone(),
                     reasoning_effort.clone(),
                     plan_reasoning_effort.clone(),
+                    auto_compact_percent,
                     provider,
                 ),
             )?;
@@ -119,9 +125,17 @@ pub fn load_codex_config_providers(
             model,
             reasoning_effort,
             plan_reasoning_effort,
+            auto_compact_percent,
         )?;
     } else {
-        add_openai_provider_for_openai_auth(&mut registry, &codex_auth, None, None, None)?;
+        add_openai_provider_for_openai_auth(
+            &mut registry,
+            &codex_auth,
+            None,
+            None,
+            None,
+            DEFAULT_AUTO_COMPACT_PERCENT,
+        )?;
     }
 
     Ok(registry)
@@ -139,10 +153,34 @@ fn load_codex_config(config_path: &Path) -> Result<Option<CodexConfig>> {
         .with_context(|| format!("failed to parse Codex config {}", config_path.display()))
 }
 
+fn imported_auto_compact_percent(config: &CodexConfig, model_catalog: &ModelCatalog) -> u8 {
+    if config
+        .model_auto_compact_token_limit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.as_str().map(str::trim) != Some("total"))
+    {
+        return DEFAULT_AUTO_COMPACT_PERCENT;
+    }
+
+    let Some(token_limit) = config
+        .model_auto_compact_token_limit
+        .as_ref()
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| u64::try_from(value).ok())
+    else {
+        return DEFAULT_AUTO_COMPACT_PERCENT;
+    };
+
+    model_catalog
+        .auto_compact_percent(config.model.as_deref(), token_limit)
+        .unwrap_or(DEFAULT_AUTO_COMPACT_PERCENT)
+}
+
 fn imported_provider_config(
     model: Option<String>,
     reasoning_effort: Option<String>,
     plan_reasoning_effort: Option<String>,
+    auto_compact_percent: u8,
     provider: CodexProviderConfig,
 ) -> ProviderConfig {
     let requires_openai_auth = provider.requires_openai_auth.unwrap_or(false);
@@ -164,7 +202,7 @@ fn imported_provider_config(
         model,
         reasoning_effort,
         plan_reasoning_effort,
-        auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+        auto_compact_percent,
         api_key,
         env_key,
         base_url: provider.base_url.unwrap_or_default(),
@@ -183,6 +221,7 @@ fn add_openai_provider_for_openai_auth(
     model: Option<String>,
     reasoning_effort: Option<String>,
     plan_reasoning_effort: Option<String>,
+    auto_compact_percent: u8,
 ) -> Result<()> {
     if !auth.has_openai_auth {
         return Ok(());
@@ -197,7 +236,7 @@ fn add_openai_provider_for_openai_auth(
             model,
             reasoning_effort,
             plan_reasoning_effort,
-            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+            auto_compact_percent,
             api_key: None,
             env_key: None,
             base_url: OPENAI_BASE_URL.to_string(),

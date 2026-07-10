@@ -21,7 +21,9 @@ mod tests {
     use super::*;
     use crate::{
         app::ProviderEditor,
-        provider_config::{ModelCatalog, ProviderAuthMode, ProviderRegistry},
+        provider_config::{
+            DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderRegistry,
+        },
     };
     use tempfile::tempdir;
 
@@ -35,9 +37,9 @@ mod tests {
     fn gpt_5_6_catalog() -> ModelCatalog {
         ModelCatalog::from_json(
             r#"{"models":[
-          {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
-          {"slug":"gpt-5.6-terra","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
-          {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+          {"slug":"gpt-5.6-sol","context_window":372000,"default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+          {"slug":"gpt-5.6-terra","context_window":372000,"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+          {"slug":"gpt-5.6-luna","context_window":372000,"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
         ]}"#,
         )
         .unwrap()
@@ -73,6 +75,7 @@ requires_openai_auth = false
         assert_eq!(provider.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(provider.reasoning_effort.as_deref(), Some("medium"));
         assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(provider.auto_compact_percent, DEFAULT_AUTO_COMPACT_PERCENT);
         assert_eq!(provider.api_key.as_deref(), Some("sk-test"));
         assert_eq!(provider.env_key.as_deref(), None);
         assert_eq!(provider.base_url, "https://api.example.test/v1");
@@ -349,6 +352,88 @@ wire_api = "responses"
     }
 
     #[test]
+    fn imports_total_auto_compact_limit_as_percent() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_auto_compact_token_limit = 260400
+model_auto_compact_token_limit_scope = "total"
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+
+        assert_eq!(registry.providers["switcher"].auto_compact_percent, 70);
+    }
+
+    #[test]
+    fn imported_auto_compact_percent_rounds_down() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_auto_compact_token_limit = 260399
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+
+        assert_eq!(registry.providers["switcher"].auto_compact_percent, 69);
+    }
+
+    #[test]
+    fn unsafe_auto_compact_imports_use_default_percent() {
+        let cases = [
+            "model_auto_compact_token_limit = 0",
+            "model_auto_compact_token_limit = 372000",
+            "model_auto_compact_token_limit = -1",
+            "model_auto_compact_token_limit = \"bad\"",
+            "model_auto_compact_token_limit = 260400\nmodel_auto_compact_token_limit_scope = \"body_after_prefix\"",
+            "model_auto_compact_token_limit = 260400\nmodel_auto_compact_token_limit_scope = 7",
+        ];
+
+        for (index, compact_config) in cases.into_iter().enumerate() {
+            let dir = tempdir().unwrap();
+            let config_path = dir.path().join(format!("config-{index}.toml"));
+            let auth_path = dir.path().join("auth.json");
+            fs::write(
+                &config_path,
+                format!(
+                    "model = \"gpt-5.6-sol\"\n{compact_config}\n\n[model_providers.switcher]\nbase_url = \"https://example.test/v1\"\nwire_api = \"responses\"\n"
+                ),
+            )
+            .unwrap();
+
+            let registry =
+                load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+
+            assert_eq!(
+                registry.providers["switcher"].auto_compact_percent,
+                DEFAULT_AUTO_COMPACT_PERCENT
+            );
+        }
+    }
+
+    #[test]
     fn imported_missing_efforts_follow_new_model_defaults_in_editor() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
@@ -427,6 +512,8 @@ wire_api = "responses"
 model = "gpt-5.6-sol"
 model_reasoning_effort = "ultra"
 plan_mode_reasoning_effort = "max"
+model_auto_compact_token_limit = 260399
+model_auto_compact_token_limit_scope = "total"
 "#,
         )
         .unwrap();
@@ -443,6 +530,7 @@ plan_mode_reasoning_effort = "max"
         assert_eq!(provider.model.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(provider.reasoning_effort.as_deref(), Some("ultra"));
         assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("max"));
+        assert_eq!(provider.auto_compact_percent, 69);
         assert_eq!(provider.auth_mode, ProviderAuthMode::OpenAi);
     }
 }

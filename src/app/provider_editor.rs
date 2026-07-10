@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
+use anyhow::{Context, Result, bail};
+
 use crate::provider_config::{
-    ModelCatalog, ProviderAuthMode, ProviderConfig, ReasoningProfile, effective_model,
+    DEFAULT_AUTO_COMPACT_PERCENT, MAX_AUTO_COMPACT_PERCENT, MIN_AUTO_COMPACT_PERCENT, ModelCatalog,
+    ProviderAuthMode, ProviderConfig, ReasoningProfile, effective_model,
 };
 
 use super::{TextField, cycle_index};
@@ -16,6 +19,7 @@ pub enum ProviderField {
     Model,
     ReasoningEffort,
     PlanReasoningEffort,
+    AutoCompactPercent,
 }
 
 pub struct ProviderEditor {
@@ -28,6 +32,7 @@ pub struct ProviderEditor {
     pub reasoning_effort_options: Vec<String>,
     pub plan_reasoning_effort: String,
     pub plan_reasoning_effort_options: Vec<String>,
+    pub auto_compact_percent: TextField,
     pub api_key: TextField,
     pub base_url: TextField,
     pub wire_api: String,
@@ -68,6 +73,7 @@ impl ProviderEditor {
             reasoning_effort_options: profile.supported_efforts().to_vec(),
             plan_reasoning_effort: profile.default_effort().to_string(),
             plan_reasoning_effort_options: profile.supported_efforts().to_vec(),
+            auto_compact_percent: TextField::new(DEFAULT_AUTO_COMPACT_PERCENT.to_string()),
             api_key: TextField::empty(),
             base_url: TextField::empty(),
             wire_api: "responses".to_string(),
@@ -123,6 +129,7 @@ impl ProviderEditor {
             reasoning_effort_options: profile.supported_efforts().to_vec(),
             plan_reasoning_effort,
             plan_reasoning_effort_options: profile.supported_efforts().to_vec(),
+            auto_compact_percent: TextField::new(provider.auto_compact_percent.to_string()),
             api_key: TextField::new(api_key),
             base_url: TextField::new(base_url),
             wire_api: provider.wire_api.clone(),
@@ -169,7 +176,8 @@ impl ProviderEditor {
             | ProviderField::WireApi
             | ProviderField::Model
             | ProviderField::ReasoningEffort
-            | ProviderField::PlanReasoningEffort => true,
+            | ProviderField::PlanReasoningEffort
+            | ProviderField::AutoCompactPercent => true,
         }
     }
 
@@ -192,6 +200,10 @@ impl ProviderEditor {
                 self.plan_reasoning_effort = profile.default_effort().to_string();
                 self.plan_reasoning_effort_explicit = false;
             }
+            ProviderField::AutoCompactPercent => {
+                self.auto_compact_percent
+                    .set(DEFAULT_AUTO_COMPACT_PERCENT.to_string());
+            }
             ProviderField::ApiKey => {
                 self.api_key.clear();
             }
@@ -211,6 +223,7 @@ impl ProviderEditor {
                 Some(&mut self.api_key)
             }
             ProviderField::BaseUrl => Some(&mut self.base_url),
+            ProviderField::AutoCompactPercent => Some(&mut self.auto_compact_percent),
             ProviderField::ApiKey
             | ProviderField::ReasoningEffort
             | ProviderField::PlanReasoningEffort
@@ -267,12 +280,27 @@ impl ProviderEditor {
         }
     }
 
+    pub fn parsed_auto_compact_percent(&self) -> Result<u8> {
+        let percent = self
+            .auto_compact_percent
+            .trim()
+            .parse::<u8>()
+            .context("auto_compact_percent must be an integer between 1 and 99")?;
+        if !(MIN_AUTO_COMPACT_PERCENT..=MAX_AUTO_COMPACT_PERCENT).contains(&percent) {
+            bail!(
+                "auto_compact_percent must be between {MIN_AUTO_COMPACT_PERCENT} and {MAX_AUTO_COMPACT_PERCENT}"
+            );
+        }
+        Ok(percent)
+    }
+
     pub const fn text_cursor_for(&self, field: ProviderField) -> Option<usize> {
         match field {
             ProviderField::Id => Some(self.id.cursor()),
             ProviderField::Model => Some(self.model.cursor()),
             ProviderField::ApiKey => Some(self.api_key.cursor()),
             ProviderField::BaseUrl => Some(self.base_url.cursor()),
+            ProviderField::AutoCompactPercent => Some(self.auto_compact_percent.cursor()),
             ProviderField::ReasoningEffort
             | ProviderField::PlanReasoningEffort
             | ProviderField::WireApi
@@ -307,6 +335,7 @@ impl ProviderEditor {
             | ProviderField::Model
             | ProviderField::ApiKey
             | ProviderField::BaseUrl
+            | ProviderField::AutoCompactPercent
             | ProviderField::Auth => false,
         }
     }
@@ -332,19 +361,21 @@ impl ProviderField {
             Self::WireApi | Self::Auth => Self::Model,
             Self::Model => Self::ReasoningEffort,
             Self::ReasoningEffort => Self::PlanReasoningEffort,
-            Self::PlanReasoningEffort => Self::Id,
+            Self::PlanReasoningEffort => Self::AutoCompactPercent,
+            Self::AutoCompactPercent => Self::Id,
         }
     }
 
     pub const fn previous(self) -> Self {
         match self {
-            Self::Id => Self::PlanReasoningEffort,
+            Self::Id => Self::AutoCompactPercent,
             Self::BaseUrl => Self::Id,
             Self::ApiKey => Self::BaseUrl,
             Self::WireApi => Self::ApiKey,
             Self::Auth | Self::Model => Self::WireApi,
             Self::ReasoningEffort => Self::Model,
             Self::PlanReasoningEffort => Self::ReasoningEffort,
+            Self::AutoCompactPercent => Self::PlanReasoningEffort,
         }
     }
 }
@@ -684,6 +715,45 @@ mod tests {
         assert_eq!(empty_to_none(""), None);
         assert_eq!(empty_to_none("   "), None);
         assert_eq!(empty_to_none("  gpt-5.5 "), Some("gpt-5.5".to_string()));
+    }
+
+    #[test]
+    fn auto_compact_percent_defaults_loads_and_validates() {
+        let editor = ProviderEditor::new();
+        assert_eq!(editor.auto_compact_percent.as_str(), "70");
+        assert_eq!(editor.parsed_auto_compact_percent().unwrap(), 70);
+
+        let mut provider = api_key_provider();
+        provider.auto_compact_percent = 65;
+        let mut editor = ProviderEditor::from_provider("switcher", &provider);
+        assert_eq!(editor.auto_compact_percent.as_str(), "65");
+
+        editor.auto_compact_percent.set("1");
+        assert_eq!(editor.parsed_auto_compact_percent().unwrap(), 1);
+        editor.auto_compact_percent.set("99");
+        assert_eq!(editor.parsed_auto_compact_percent().unwrap(), 99);
+
+        for invalid in ["", "abc", "0", "100", "999"] {
+            editor.auto_compact_percent.set(invalid);
+            assert!(editor.parsed_auto_compact_percent().is_err());
+        }
+    }
+
+    #[test]
+    fn auto_compact_field_participates_in_navigation_and_reset() {
+        let mut editor = ProviderEditor::new();
+        editor.active_field = ProviderField::PlanReasoningEffort;
+
+        editor.next_field();
+        assert_eq!(editor.active_field, ProviderField::AutoCompactPercent);
+        editor.auto_compact_percent.set("65");
+        editor.clear_active_field();
+        assert_eq!(editor.auto_compact_percent.as_str(), "70");
+
+        editor.next_field();
+        assert_eq!(editor.active_field, ProviderField::Id);
+        editor.previous_field();
+        assert_eq!(editor.active_field, ProviderField::AutoCompactPercent);
     }
 
     #[test]

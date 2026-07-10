@@ -54,6 +54,12 @@ pub(super) fn draw_provider_editor(
             "plan_reason",
             empty_display(&editor.plan_reasoning_effort),
         ),
+        provider_editor_line(
+            editor,
+            ProviderField::AutoCompactPercent,
+            "auto_compact",
+            editor.auto_compact_percent.as_str(),
+        ),
         Line::raw(""),
     ];
     if let Some(options_line) = provider_editor_options_line(editor) {
@@ -123,6 +129,7 @@ const fn provider_editor_field_row(field: ProviderField) -> Option<u16> {
         ProviderField::BaseUrl => Some(2),
         ProviderField::ApiKey => Some(3),
         ProviderField::Model => Some(5),
+        ProviderField::AutoCompactPercent => Some(8),
         ProviderField::WireApi
         | ProviderField::Auth
         | ProviderField::ReasoningEffort
@@ -136,6 +143,10 @@ fn provider_editor_active_text(editor: &ProviderEditor) -> Option<(&str, usize)>
         ProviderField::BaseUrl => Some((editor.base_url.as_str(), editor.base_url.cursor())),
         ProviderField::ApiKey => Some((editor.api_key.as_str(), editor.api_key.cursor())),
         ProviderField::Model => Some((editor.model.as_str(), editor.model.cursor())),
+        ProviderField::AutoCompactPercent => Some((
+            editor.auto_compact_percent.as_str(),
+            editor.auto_compact_percent.cursor(),
+        )),
         ProviderField::WireApi
         | ProviderField::Auth
         | ProviderField::ReasoningEffort
@@ -176,6 +187,7 @@ fn provider_field_options_text(editor: &ProviderEditor) -> Option<String> {
         ProviderField::PlanReasoningEffort => {
             Some(editor.plan_reasoning_effort_options.join(" | "))
         }
+        ProviderField::AutoCompactPercent => Some("1..99 percent | default 70".to_string()),
         ProviderField::WireApi => Some(WIRE_API_OPTIONS.join(" | ")),
         ProviderField::Id
         | ProviderField::Model
@@ -215,6 +227,13 @@ mod tests {
             provider_editor_cursor_position(popup, &editor),
             Some(Position::new(26, 7))
         );
+
+        editor.auto_compact_percent.set_with_cursor("65", 1);
+        editor.active_field = ProviderField::AutoCompactPercent;
+        assert_eq!(
+            provider_editor_cursor_position(popup, &editor),
+            Some(Position::new(25, 13))
+        );
     }
 
     #[test]
@@ -250,6 +269,10 @@ mod tests {
             None
         );
         assert_eq!(provider_editor_active_text(&editor), None);
+
+        editor.active_field = ProviderField::AutoCompactPercent;
+        let options_line = provider_editor_options_line(&editor).unwrap();
+        assert!(line_text(&options_line).contains("1..99 percent | default 70"));
     }
 
     #[test]

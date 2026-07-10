@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, time::Duration};
 
-use crate::provider_config::{self, DEFAULT_AUTO_COMPACT_PERCENT, ProviderConfig};
+use crate::provider_config::{self, ProviderConfig};
 
 use super::{
     App, ConfirmationAction, Overlay, ProviderEditor,
@@ -288,6 +288,13 @@ impl App {
         let Some(editor) = self.providers.editor.take() else {
             return;
         };
+        let auto_compact_percent = match editor.parsed_auto_compact_percent() {
+            Ok(percent) => percent,
+            Err(err) => {
+                self.restore_provider_editor_with_error(editor, format!("Invalid provider: {err}"));
+                return;
+            }
+        };
         let id = editor.id.trim().to_string();
         let original_provider = editor
             .original_id
@@ -302,7 +309,7 @@ impl App {
             model: empty_to_none(editor.model.as_str()),
             reasoning_effort: empty_to_none(&editor.reasoning_effort),
             plan_reasoning_effort: empty_to_none(&editor.plan_reasoning_effort),
-            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+            auto_compact_percent,
             api_key,
             env_key,
             base_url: editor.base_url.trim().to_string(),
@@ -357,7 +364,9 @@ mod tests {
     use super::*;
     use std::{path::PathBuf, sync::mpsc};
 
-    use crate::provider_config::{ModelCatalog, ProviderAuthMode, ProviderRegistry};
+    use crate::provider_config::{
+        DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderRegistry,
+    };
     use tempfile::tempdir;
 
     fn test_provider() -> ProviderConfig {
@@ -505,6 +514,62 @@ mod tests {
         let editor = app.providers.editor().unwrap();
         assert_eq!(editor.reasoning_effort, "low");
         assert_eq!(editor.plan_reasoning_effort, "low");
+    }
+
+    fn app_with_registry_and_paths(registry: ProviderRegistry, root: &std::path::Path) -> App {
+        App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            root.join("providers.toml"),
+            root.join("config.toml"),
+            root.join("sessions"),
+        )
+    }
+
+    #[test]
+    fn saves_auto_compact_percent_from_editor() {
+        let dir = tempdir().unwrap();
+        let mut app = app_with_registry_and_paths(ProviderRegistry::default(), dir.path());
+        let mut editor = ProviderEditor::new();
+        editor.id.set("switcher");
+        editor.base_url.set("https://example.test/v1");
+        editor.api_key.set("sk-test");
+        editor.auto_compact_percent.set("65");
+        app.providers.editor = Some(editor);
+        app.overlay = Some(Overlay::ProviderEditor);
+
+        app.save_provider_editor();
+
+        assert_eq!(
+            app.providers.registry.providers["switcher"].auto_compact_percent,
+            65
+        );
+        assert_eq!(app.overlay, None);
+    }
+
+    #[test]
+    fn invalid_auto_compact_percent_keeps_editor_open() {
+        let dir = tempdir().unwrap();
+        let mut app = app_with_registry_and_paths(ProviderRegistry::default(), dir.path());
+        let mut editor = ProviderEditor::new();
+        editor.id.set("switcher");
+        editor.base_url.set("https://example.test/v1");
+        editor.api_key.set("sk-test");
+        editor.auto_compact_percent.set("100");
+        app.providers.editor = Some(editor);
+        app.overlay = Some(Overlay::ProviderEditor);
+
+        app.save_provider_editor();
+
+        assert!(app.providers.registry.providers.is_empty());
+        assert_eq!(app.overlay, Some(Overlay::ProviderEditor));
+        assert!(app.providers.editor.is_some());
+        assert!(
+            app.error
+                .as_deref()
+                .is_some_and(|error| error.contains("between 1 and 99"))
+        );
     }
 
     fn app_with_provider_count(count: usize) -> App {

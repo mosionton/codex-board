@@ -521,6 +521,26 @@ mod tests {
             KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
         );
         assert_eq!(app.providers.editor().unwrap().base_url.as_str(), "");
+
+        let editor = app.providers.editor_mut().unwrap();
+        editor.active_field = ProviderField::AutoCompactPercent;
+        editor.auto_compact_percent.clear();
+        handle_provider_editor_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE),
+        );
+        handle_provider_editor_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+        );
+        assert_eq!(
+            app.providers
+                .editor()
+                .unwrap()
+                .auto_compact_percent
+                .as_str(),
+            "7"
+        );
     }
 
     #[test]

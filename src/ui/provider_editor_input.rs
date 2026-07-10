@@ -42,6 +42,12 @@ pub(super) fn handle_provider_editor_key(app: &mut App, key: KeyEvent) {
                     return;
                 }
 
+                if editor.active_field == ProviderField::AutoCompactPercent
+                    && matches!(key.code, KeyCode::Char(ch) if !ch.is_ascii_digit())
+                {
+                    return;
+                }
+
                 if let Some(input) = editor.active_text_mut() {
                     handle_text_input_key(input, key);
                     return;

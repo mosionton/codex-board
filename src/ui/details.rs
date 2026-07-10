@@ -161,13 +161,15 @@ pub(super) fn provider_display_items(
     is_applied: bool,
     model_catalog: &ModelCatalog,
     current_codex_model: Option<&str>,
-) -> [(&'static str, String); 9] {
+) -> [(&'static str, String); 10] {
     let model =
         crate::provider_config::effective_model(provider.model.as_deref(), current_codex_model);
     let reasoning_effort =
         model_catalog.normalize_effort(model, provider.reasoning_effort.as_deref());
     let plan_reasoning_effort =
         model_catalog.normalize_effort(model, provider.plan_reasoning_effort.as_deref());
+    let compact_percent = provider.auto_compact_percent;
+    let compact = format!("{compact_percent}%");
     [
         ("id", id.to_string()),
         (
@@ -190,6 +192,7 @@ pub(super) fn provider_display_items(
         ("wire_api", provider.wire_api.clone()),
         ("reason", reasoning_effort),
         ("plan_reason", plan_reasoning_effort),
+        ("compact", compact),
         ("api_key", provider_api_key_display(provider)),
     ]
 }

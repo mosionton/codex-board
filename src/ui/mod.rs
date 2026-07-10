@@ -253,7 +253,7 @@ mod tests {
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: Some("high".to_string()),
             plan_reasoning_effort: None,
-            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+            auto_compact_percent: 65,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -270,7 +270,8 @@ mod tests {
         assert_eq!(items[1].1, "applied");
         assert_eq!(items[2].1, "gpt-5.5");
         assert_eq!(items[3].1, "api_key");
-        assert_eq!(items[8].1, "s******t");
+        assert_eq!(items[8], ("compact", "65%".to_string()));
+        assert_eq!(items[9].1, "s******t");
     }
 
     #[test]
@@ -310,6 +311,7 @@ mod tests {
 
         assert!(text.contains("reason     : ultra"));
         assert!(text.contains("plan_reason: max"));
+        assert!(text.contains("compact    : 70%"));
         assert!(!text.contains("reason     : medium"));
     }
 

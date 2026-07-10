@@ -215,12 +215,14 @@ wire_api = "responses"
 model = "gpt-5.6-sol"
 model_reasoning_effort = "max"
 plan_mode_reasoning_effort = "high"
+auto_compact_percent = 70
 auth_mode = "openai"
 
 [providers.local]
 base_url = "http://localhost:11434/v1"
 wire_api = "chat"
 model = "qwen3-coder"
+auto_compact_percent = 70
 env_key = "LOCAL_MODEL_API_KEY"
 auth_mode = "api_key"
 ```
@@ -234,6 +236,7 @@ auth_mode = "api_key"
 | `model` | 默认模型 |
 | `model_reasoning_effort` | 模型推理强度；候选值和默认值由当前安装的 Codex bundled model catalog 决定 |
 | `plan_mode_reasoning_effort` | Plan mode 推理强度；使用所选模型的支持列表 |
+| `auto_compact_percent` | 自动历史压缩阈值占模型上下文窗口的百分比；整数 `1..=99`，默认 `70` |
 | `auth_mode` | `api_key` 或 `openai` |
 | `env_key` | 保存密钥的环境变量名 |
 | `api_key` | 明文密钥；优先使用 `env_key` |
@@ -242,6 +245,13 @@ auth_mode = "api_key"
 `xhigh`、`max`、`ultra`；Luna 支持到 `max`。`gpt-5.6` 按 Sol 处理。
 未知模型或模型目录不可用时，codex-board 回退到 `low`、`medium`、
 `high`、`xhigh`，默认 `medium`，不会阻止 provider 编辑或应用。
+
+应用 provider 时，codex-board 会读取当前 Codex bundled model catalog 的
+`context_window`，把 `auto_compact_percent` 换算为顶层
+`model_auto_compact_token_limit`，并写入
+`model_auto_compact_token_limit_scope = "total"`。GPT-5.6 当前窗口为
+`372000`，默认 `70%` 会写入 `260400`；未知模型按 `272000` 计算，写入
+`190400`。自动压缩不能阻止单个超大输入或工具输出一次跨过阈值。
 
 认证规则：
 

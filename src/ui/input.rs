@@ -73,7 +73,10 @@ mod tests {
             ConfirmationAction, ConversationRoleFilter, Overlay, ProviderEditor, ProviderField,
             SessionViewMode,
         },
-        provider_config::{ModelCatalog, ProviderAuthMode, ProviderConfig, ProviderRegistry},
+        provider_config::{
+            DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderConfig,
+            ProviderRegistry,
+        },
         session_store::Session,
     };
     use tempfile::tempdir;
@@ -477,6 +480,7 @@ mod tests {
             model: Some("gpt-5.6-sol".to_string()),
             reasoning_effort: Some("ultra".to_string()),
             plan_reasoning_effort: Some("max".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://example.test/v1".to_string(),

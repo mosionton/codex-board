@@ -425,7 +425,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use crate::provider_config::ModelCatalog;
+    use crate::provider_config::{DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog};
 
     fn gpt_5_6_catalog() -> Arc<ModelCatalog> {
         Arc::new(
@@ -446,6 +446,7 @@ mod tests {
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: Some("invalid".to_string()),
             plan_reasoning_effort: Some("high".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: Some("OPENAI_API_KEY".to_string()),
             base_url: "https://api.example.test/v1".to_string(),
@@ -473,6 +474,7 @@ mod tests {
             model: Some("gpt-5.6-sol".to_string()),
             reasoning_effort: Some("xhigh".to_string()),
             plan_reasoning_effort: Some("ultra".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://example.test/v1".to_string(),
@@ -493,6 +495,7 @@ mod tests {
             model: None,
             reasoning_effort: Some("ultra".to_string()),
             plan_reasoning_effort: Some("max".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://example.test/v1".to_string(),
@@ -523,6 +526,7 @@ mod tests {
             model: None,
             reasoning_effort: Some("ultra".to_string()),
             plan_reasoning_effort: Some("max".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://example.test/v1".to_string(),
@@ -685,6 +689,7 @@ mod tests {
     #[test]
     fn editor_credentials_keep_env_key_until_api_key_changes() {
         let original_provider = ProviderConfig {
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-original".to_string()),
             ..api_key_provider()
         };

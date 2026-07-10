@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, time::Duration};
 
-use crate::provider_config::{self, ProviderConfig};
+use crate::provider_config::{self, DEFAULT_AUTO_COMPACT_PERCENT, ProviderConfig};
 
 use super::{
     App, ConfirmationAction, Overlay, ProviderEditor,
@@ -302,6 +302,7 @@ impl App {
             model: empty_to_none(editor.model.as_str()),
             reasoning_effort: empty_to_none(&editor.reasoning_effort),
             plan_reasoning_effort: empty_to_none(&editor.plan_reasoning_effort),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key,
             env_key,
             base_url: editor.base_url.trim().to_string(),
@@ -364,6 +365,7 @@ mod tests {
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -391,6 +393,7 @@ mod tests {
                     model: Some("gpt-5.6-sol".to_string()),
                     reasoning_effort: None,
                     plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     ..test_provider()
                 },
             )
@@ -422,6 +425,7 @@ mod tests {
                     model: None,
                     reasoning_effort: Some("ultra".to_string()),
                     plan_reasoning_effort: Some("max".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     ..test_provider()
                 },
             )
@@ -457,6 +461,7 @@ mod tests {
                     model: None,
                     reasoning_effort: Some("ultra".to_string()),
                     plan_reasoning_effort: Some("max".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     ..test_provider()
                 },
             )
@@ -622,6 +627,7 @@ mod tests {
                     model: Some("gpt-5.5".to_string()),
                     reasoning_effort: None,
                     plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: Some("sk-test".to_string()),
                     env_key: None,
                     base_url: "https://api.example.test/v1".to_string(),
@@ -664,6 +670,7 @@ mod tests {
                     model: None,
                     reasoning_effort: Some("ultra".to_string()),
                     plan_reasoning_effort: Some("max".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: Some("sk-test".to_string()),
                     env_key: None,
                     base_url: "https://api.example.test/v1".to_string(),

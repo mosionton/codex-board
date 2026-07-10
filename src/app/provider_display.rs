@@ -57,7 +57,7 @@ fn mask_secret(secret: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider_config::ProviderAuthMode;
+    use crate::provider_config::{DEFAULT_AUTO_COMPACT_PERCENT, ProviderAuthMode};
 
     #[test]
     fn masks_secret_for_display() {
@@ -75,6 +75,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-1234567890abcdef".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -92,6 +93,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -108,6 +110,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: Some("CODEX_SWITCHER_TEST_MISSING_API_KEY".to_string()),
             base_url: "https://api.example.test/v1".to_string(),
@@ -131,6 +134,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: Some("CODEX_SWITCHER_TEST_DISPLAY_API_KEY".to_string()),
             base_url: "https://api.example.test/v1".to_string(),

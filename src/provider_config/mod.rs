@@ -16,5 +16,6 @@ pub use model_catalog::{ModelCatalog, ModelCatalogLoad, ReasoningProfile, effect
 pub use models::fetch_provider_models;
 use registry::validate_provider_definition;
 pub use registry::{
-    CONFIG_FILE_NAME, ProviderAuthMode, ProviderConfig, ProviderRegistry, config_path,
+    CONFIG_FILE_NAME, DEFAULT_AUTO_COMPACT_PERCENT, MAX_AUTO_COMPACT_PERCENT,
+    MIN_AUTO_COMPACT_PERCENT, ProviderAuthMode, ProviderConfig, ProviderRegistry, config_path,
 };

@@ -11,6 +11,13 @@ use super::file_io::write_file_atomic;
 
 pub const CONFIG_FILE_NAME: &str = "switcher-providers.toml";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+pub const DEFAULT_AUTO_COMPACT_PERCENT: u8 = 70;
+pub const MIN_AUTO_COMPACT_PERCENT: u8 = 1;
+pub const MAX_AUTO_COMPACT_PERCENT: u8 = 99;
+
+const fn default_auto_compact_percent() -> u8 {
+    DEFAULT_AUTO_COMPACT_PERCENT
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderRegistry {
@@ -36,6 +43,8 @@ pub struct ProviderConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub plan_reasoning_effort: Option<String>,
+    #[serde(default = "default_auto_compact_percent")]
+    pub auto_compact_percent: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -185,6 +194,7 @@ impl ProviderConfig {
             model: None,
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: None,
             base_url: base_url.into(),
@@ -203,8 +213,16 @@ impl ProviderConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error if required fields are empty.
+    /// Returns an error if the auto-compact percentage is outside the supported range or required
+    /// fields are empty.
     pub fn validate(&self) -> Result<()> {
+        if !(MIN_AUTO_COMPACT_PERCENT..=MAX_AUTO_COMPACT_PERCENT)
+            .contains(&self.auto_compact_percent)
+        {
+            bail!(
+                "auto_compact_percent must be between {MIN_AUTO_COMPACT_PERCENT} and {MAX_AUTO_COMPACT_PERCENT}"
+            );
+        }
         if self.base_url.trim().is_empty() {
             bail!("base_url is required");
         }
@@ -287,6 +305,76 @@ mod tests {
     }
 
     #[test]
+    fn missing_auto_compact_percent_uses_default() {
+        let dir = tempdir().unwrap();
+        let path = config_path(dir.path());
+        fs::write(
+            &path,
+            r#"
+[providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+
+        let registry = ProviderRegistry::load(&path).unwrap();
+
+        assert_eq!(
+            registry.providers["switcher"].auto_compact_percent,
+            DEFAULT_AUTO_COMPACT_PERCENT
+        );
+    }
+
+    #[test]
+    fn saves_auto_compact_percent_explicitly() {
+        let dir = tempdir().unwrap();
+        let path = config_path(dir.path());
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig::new("https://example.test/v1", "responses"),
+            )
+            .unwrap();
+
+        registry.save(&path).unwrap();
+
+        let text = fs::read_to_string(path).unwrap();
+        assert!(text.contains("auto_compact_percent = 70"));
+    }
+
+    #[test]
+    fn rejects_auto_compact_percent_outside_supported_range() {
+        for percent in [0, 100] {
+            let mut registry = ProviderRegistry::default();
+            let mut provider = ProviderConfig::new("https://example.test/v1", "responses");
+            provider.auto_compact_percent = percent;
+
+            let error = registry.upsert("switcher", provider).unwrap_err();
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("auto_compact_percent must be between 1 and 99")
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_auto_compact_percent_range_boundaries() {
+        for percent in [1, 99] {
+            let mut registry = ProviderRegistry::default();
+            let mut provider = ProviderConfig::new("https://example.test/v1", "responses");
+            provider.auto_compact_percent = percent;
+
+            registry
+                .upsert(format!("switcher-{percent}"), provider)
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn rejects_invalid_provider_config() {
         let mut registry = ProviderRegistry::default();
         assert!(
@@ -336,6 +424,7 @@ mod tests {
                     model: None,
                     reasoning_effort: None,
                     plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: None,
                     env_key: None,
                     base_url: "https://local.example/v1".to_string(),
@@ -353,6 +442,7 @@ mod tests {
                     model: Some("gpt-5.5".to_string()),
                     reasoning_effort: Some("low".to_string()),
                     plan_reasoning_effort: Some("xhigh".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: Some("sk-test".to_string()),
                     env_key: Some("OPENAI_API_KEY".to_string()),
                     base_url: "https://remote.example/v1".to_string(),

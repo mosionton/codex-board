@@ -176,7 +176,7 @@ mod tests {
     use std::{env, fs};
 
     use super::*;
-    use crate::provider_config::{ModelCatalog, ProviderAuthMode};
+    use crate::provider_config::{DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode};
     use tempfile::tempdir;
 
     fn gpt_5_6_catalog() -> ModelCatalog {
@@ -207,6 +207,7 @@ mod tests {
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: Some("high".to_string()),
             plan_reasoning_effort: Some("medium".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -296,6 +297,7 @@ wire_api = "responses"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: Some("high".to_string()),
             plan_reasoning_effort: Some("medium".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -339,6 +341,7 @@ plan_mode_reasoning_effort = "xhigh"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: Some("none".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -380,6 +383,7 @@ plan_mode_reasoning_effort = "xhigh"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -423,6 +427,7 @@ wire_api = "responses"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: Some("high".to_string()),
             plan_reasoning_effort: Some("medium".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: None,
             base_url: OPENAI_BASE_URL.to_string(),
@@ -453,6 +458,7 @@ wire_api = "responses"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -487,6 +493,7 @@ wire_api = "responses"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-login-auth".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -525,6 +532,7 @@ wire_api = "responses"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-env-provider".to_string()),
             env_key: Some("CODEX_SWITCHER_TEST_PROVIDER_API_KEY".to_string()),
             base_url: "https://api.example.test/v1".to_string(),
@@ -562,6 +570,7 @@ wire_api = "responses"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: Some("CODEX_SWITCHER_TEST_PROVIDER_ENV_ONLY".to_string()),
             base_url: "https://api.example.test/v1".to_string(),
@@ -592,6 +601,7 @@ wire_api = "responses"
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: Some("CODEX_SWITCHER_TEST_MISSING_PROVIDER_API_KEY".to_string()),
             base_url: "https://api.example.test/v1".to_string(),
@@ -615,6 +625,7 @@ wire_api = "responses"
             model: Some("gpt-5.6-sol".to_string()),
             reasoning_effort: Some("ultra".to_string()),
             plan_reasoning_effort: Some("max".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://example.test/v1".to_string(),
@@ -636,6 +647,7 @@ wire_api = "responses"
             model: None,
             reasoning_effort: Some("ultra".to_string()),
             plan_reasoning_effort: Some("max".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://example.test/v1".to_string(),
@@ -657,6 +669,7 @@ wire_api = "responses"
             model: None,
             reasoning_effort: Some("ultra".to_string()),
             plan_reasoning_effort: Some("max".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://example.test/v1".to_string(),

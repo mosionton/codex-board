@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::{
-    ModelCatalog, ProviderAuthMode, ProviderConfig, ProviderRegistry,
+    DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderConfig, ProviderRegistry,
     auth::{CodexAuth, load_codex_auth, load_env_key_value, normalize_env_key},
 };
 
@@ -164,6 +164,7 @@ fn imported_provider_config(
         model,
         reasoning_effort,
         plan_reasoning_effort,
+        auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
         api_key,
         env_key,
         base_url: provider.base_url.unwrap_or_default(),
@@ -196,6 +197,7 @@ fn add_openai_provider_for_openai_auth(
             model,
             reasoning_effort,
             plan_reasoning_effort,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: None,
             base_url: OPENAI_BASE_URL.to_string(),

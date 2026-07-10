@@ -3,7 +3,10 @@ use std::{collections::BTreeMap, process::Command};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+use super::registry::{MAX_AUTO_COMPACT_PERCENT, MIN_AUTO_COMPACT_PERCENT};
+
 const FALLBACK_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh"];
+const FALLBACK_CONTEXT_WINDOW: u64 = 272_000;
 const WARNING: &str = "Codex model catalog unavailable; using compatibility reasoning options.";
 
 #[must_use]
@@ -25,6 +28,7 @@ pub fn effective_model<'a>(
 pub struct ReasoningProfile {
     default_effort: String,
     supported_efforts: Vec<String>,
+    context_window: u64,
 }
 
 impl ReasoningProfile {
@@ -36,6 +40,11 @@ impl ReasoningProfile {
     #[must_use]
     pub fn supported_efforts(&self) -> &[String] {
         &self.supported_efforts
+    }
+
+    #[must_use]
+    pub const fn context_window(&self) -> u64 {
+        self.context_window
     }
 
     #[must_use]
@@ -67,6 +76,7 @@ impl Default for ModelCatalog {
             fallback: ReasoningProfile {
                 default_effort: "medium".to_string(),
                 supported_efforts: FALLBACK_EFFORTS.iter().map(ToString::to_string).collect(),
+                context_window: FALLBACK_CONTEXT_WINDOW,
             },
         }
     }
@@ -103,6 +113,12 @@ impl ModelCatalog {
             };
             let slug = model.slug.trim();
             let default_effort = model.default_reasoning_level.trim();
+            let context_window = model
+                .context_window
+                .as_ref()
+                .and_then(serde_json::Value::as_u64)
+                .filter(|window| *window > 0)
+                .unwrap_or(FALLBACK_CONTEXT_WINDOW);
             let mut supported_efforts = Vec::new();
 
             for level in model.supported_reasoning_levels {
@@ -131,6 +147,7 @@ impl ModelCatalog {
                 ReasoningProfile {
                     default_effort: default_effort.to_string(),
                     supported_efforts,
+                    context_window,
                 },
             );
         }
@@ -160,6 +177,27 @@ impl ModelCatalog {
     #[must_use]
     pub fn normalize_effort(&self, model: Option<&str>, effort: Option<&str>) -> String {
         self.profile_for(model).normalize(effort)
+    }
+
+    #[must_use]
+    pub fn auto_compact_token_limit(&self, model: Option<&str>, percent: u8) -> u64 {
+        let limit =
+            u128::from(self.profile_for(model).context_window()) * u128::from(percent) / 100;
+        u64::try_from(limit).unwrap_or(u64::MAX)
+    }
+
+    #[must_use]
+    pub fn auto_compact_percent(&self, model: Option<&str>, token_limit: u64) -> Option<u8> {
+        let context_window = self.profile_for(model).context_window();
+        if token_limit == 0 || token_limit >= context_window {
+            return None;
+        }
+
+        let percent = u128::from(token_limit) * 100 / u128::from(context_window);
+        let percent = u8::try_from(percent).ok()?;
+        (MIN_AUTO_COMPACT_PERCENT..=MAX_AUTO_COMPACT_PERCENT)
+            .contains(&percent)
+            .then_some(percent)
     }
 
     fn from_command_result(success: bool, stdout: &[u8]) -> ModelCatalogLoad {
@@ -196,6 +234,8 @@ struct CatalogModel {
     default_reasoning_level: String,
     #[serde(default)]
     supported_reasoning_levels: Vec<CatalogLevel>,
+    #[serde(default)]
+    context_window: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,9 +249,9 @@ mod tests {
 
     const GPT_5_6_CATALOG: &str = r#"{
       "models": [
-        {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}],"ignored":true},
-        {"slug":"gpt-5.6-terra","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
-        {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+        {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}],"context_window":372000,"ignored":true},
+        {"slug":"gpt-5.6-terra","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}],"context_window":372000},
+        {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"context_window":372000}
       ]
     }"#;
 
@@ -227,6 +267,62 @@ mod tests {
         assert_eq!(catalog.profile_for(Some("gpt-5.6")), sol);
         assert!(catalog.profile_for(Some("gpt-5.6-terra")).supports("ultra"));
         assert!(!catalog.profile_for(Some("gpt-5.6-luna")).supports("ultra"));
+    }
+
+    #[test]
+    fn parses_context_window_and_calculates_compaction_values() {
+        let catalog = ModelCatalog::from_json(GPT_5_6_CATALOG).unwrap();
+        let sol = catalog.profile_for(Some("gpt-5.6-sol"));
+
+        assert_eq!(sol.context_window(), 372_000);
+        assert_eq!(
+            catalog.profile_for(Some("gpt-5.6")).context_window(),
+            372_000
+        );
+        assert_eq!(
+            catalog.auto_compact_token_limit(Some("gpt-5.6-sol"), 70),
+            260_400
+        );
+        assert_eq!(
+            catalog.auto_compact_percent(Some("gpt-5.6-sol"), 260_400),
+            Some(70)
+        );
+        assert_eq!(
+            catalog.auto_compact_percent(Some("gpt-5.6-sol"), 260_399),
+            Some(69)
+        );
+    }
+
+    #[test]
+    fn invalid_or_missing_context_windows_use_compatibility_value() {
+        let catalog = ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"missing","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]},
+              {"slug":"zero","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}],"context_window":0},
+              {"slug":"wrong-type","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}],"context_window":"large"}
+            ]}"#,
+        )
+        .unwrap();
+
+        for model in ["missing", "zero", "wrong-type", "unknown"] {
+            assert_eq!(catalog.profile_for(Some(model)).context_window(), 272_000);
+            assert_eq!(catalog.auto_compact_token_limit(Some(model), 70), 190_400);
+        }
+    }
+
+    #[test]
+    fn inverse_compaction_rejects_invalid_thresholds() {
+        let catalog = ModelCatalog::from_json(GPT_5_6_CATALOG).unwrap();
+
+        assert_eq!(catalog.auto_compact_percent(Some("gpt-5.6-sol"), 0), None);
+        assert_eq!(
+            catalog.auto_compact_percent(Some("gpt-5.6-sol"), 372_000),
+            None
+        );
+        assert_eq!(
+            catalog.auto_compact_percent(Some("gpt-5.6-sol"), 400_000),
+            None
+        );
     }
 
     #[test]

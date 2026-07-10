@@ -18,7 +18,8 @@
 - GPT-5.6 当前 `372000 * 70 / 100` 必须写为 `260400`。
 - 未知模型当前 `272000 * 70 / 100` 必须写为 `190400`。
 - 最终必须写入 `model_auto_compact_token_limit_scope = "total"`。
-- 导入反算必须向下取整，重新应用后的绝对阈值不得高于导入值。
+- 成功反算出合法百分比时必须向下取整，重新应用后的绝对阈值不得高于导入值；
+  无法安全反算的阈值仍回退 `70`。
 - `body_after_prefix`、错误类型和越界阈值导入时必须回退 `70`，不得阻断其他 provider。
 - 不增加 provider 级 `model_context_window`，不修改压缩提示词，不改变 Claude Code 配置。
 - 不增加新的 Cargo 依赖。
@@ -413,6 +414,12 @@ git commit -m 'feat: 解析模型上下文窗口' -m $'统一计算 Codex 自动
 
 Update the local `gpt_5_6_catalog()` fixture in `src/provider_config/codex.rs` so every GPT-5.6 entry contains `"context_window":372000`. Add:
 
+Import the default constant in the test module:
+
+```rust
+use crate::provider_config::DEFAULT_AUTO_COMPACT_PERCENT;
+```
+
 ```rust
 #[test]
 fn imports_total_auto_compact_limit_as_percent() {
@@ -497,10 +504,10 @@ fn unsafe_auto_compact_imports_use_default_percent() {
 }
 ```
 
-Extend `synthesized_openai_inherits_top_level_model_and_efforts` with a `260400` total threshold and:
+Extend `synthesized_openai_inherits_top_level_model_and_efforts` with a `260399` total threshold and:
 
 ```rust
-assert_eq!(provider.auto_compact_percent, 70);
+assert_eq!(provider.auto_compact_percent, 69);
 ```
 
 Also extend `loads_providers_from_codex_config`, whose fixture has no compact threshold, with:
@@ -514,9 +521,9 @@ assert_eq!(
 
 - [ ] **Step 2: 运行导入测试并确认仍固定为默认值**
 
-Run: `cargo test imports_total_auto_compact_limit_as_percent --all-features --locked`
+Run: `cargo test imported_auto_compact_percent_rounds_down --all-features --locked`
 
-Expected: FAIL because imported providers still receive `DEFAULT_AUTO_COMPACT_PERCENT` without reading Codex fields.
+Expected: FAIL because imported providers still receive `DEFAULT_AUTO_COMPACT_PERCENT` without reading Codex fields, so the test sees `70` instead of `69`.
 
 - [ ] **Step 3: 宽松读取 Codex 顶层压缩字段**
 

@@ -4,9 +4,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::{
-    DEFAULT_REASONING_EFFORT, ProviderAuthMode, ProviderConfig, ProviderRegistry,
+    ModelCatalog, ProviderAuthMode, ProviderConfig, ProviderRegistry,
     auth::{CodexAuth, load_codex_auth, load_env_key_value, normalize_env_key},
-    normalize_reasoning_effort,
 };
 
 const OPENAI_PROVIDER_ID: &str = "openai";
@@ -66,6 +65,7 @@ pub fn load_applied_model_provider(config_path: &Path) -> Result<Option<String>>
 pub fn load_codex_config_providers(
     config_path: &Path,
     auth_path: &Path,
+    model_catalog: &ModelCatalog,
 ) -> Result<ProviderRegistry> {
     let codex_auth = load_codex_auth(auth_path)?;
     let codex_config = load_codex_config(config_path)?;
@@ -73,11 +73,14 @@ pub fn load_codex_config_providers(
     let mut registry = ProviderRegistry::default();
     if let Some(codex_config) = codex_config {
         let model = codex_config.model.clone();
-        let reasoning_effort =
-            normalize_reasoning_effort(codex_config.model_reasoning_effort.as_deref()).to_string();
-        let plan_reasoning_effort =
-            normalize_reasoning_effort(codex_config.plan_mode_reasoning_effort.as_deref())
-                .to_string();
+        let reasoning_effort = model_catalog.normalize_effort(
+            model.as_deref(),
+            codex_config.model_reasoning_effort.as_deref(),
+        );
+        let plan_reasoning_effort = model_catalog.normalize_effort(
+            model.as_deref(),
+            codex_config.plan_mode_reasoning_effort.as_deref(),
+        );
         for (id, provider) in codex_config.model_providers {
             if provider.base_url.is_none() || provider.wire_api.is_none() {
                 continue;
@@ -92,9 +95,23 @@ pub fn load_codex_config_providers(
                 ),
             )?;
         }
+        add_openai_provider_for_openai_auth(
+            &mut registry,
+            &codex_auth,
+            model,
+            reasoning_effort,
+            plan_reasoning_effort,
+        )?;
+    } else {
+        add_openai_provider_for_openai_auth(
+            &mut registry,
+            &codex_auth,
+            None,
+            model_catalog.normalize_effort(None, None),
+            model_catalog.normalize_effort(None, None),
+        )?;
     }
 
-    add_openai_provider_for_openai_auth(&mut registry, &codex_auth)?;
     Ok(registry)
 }
 
@@ -150,6 +167,9 @@ fn imported_provider_config(
 fn add_openai_provider_for_openai_auth(
     registry: &mut ProviderRegistry,
     auth: &CodexAuth,
+    model: Option<String>,
+    reasoning_effort: String,
+    plan_reasoning_effort: String,
 ) -> Result<()> {
     if !auth.has_openai_auth {
         return Ok(());
@@ -161,9 +181,9 @@ fn add_openai_provider_for_openai_auth(
     registry.upsert(
         OPENAI_PROVIDER_ID,
         ProviderConfig {
-            model: None,
-            reasoning_effort: Some(DEFAULT_REASONING_EFFORT.to_string()),
-            plan_reasoning_effort: Some(DEFAULT_REASONING_EFFORT.to_string()),
+            model,
+            reasoning_effort: Some(reasoning_effort),
+            plan_reasoning_effort: Some(plan_reasoning_effort),
             api_key: None,
             env_key: None,
             base_url: OPENAI_BASE_URL.to_string(),

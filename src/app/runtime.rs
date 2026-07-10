@@ -25,6 +25,7 @@ pub fn run() -> Result<()> {
     provider_registry.merge_defaults(provider_config::load_codex_config_providers(
         &codex_config_path,
         &codex_auth_path,
+        &model_catalog_load.catalog,
     )?);
     let applied_provider_id = provider_config::load_applied_model_provider(&codex_config_path)?;
 

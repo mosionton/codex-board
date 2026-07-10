@@ -17,8 +17,25 @@ mod tests {
     use std::{env, fs};
 
     use super::*;
-    use crate::provider_config::ProviderAuthMode;
+    use crate::provider_config::{ModelCatalog, ProviderAuthMode, ProviderRegistry};
     use tempfile::tempdir;
+
+    fn load_with_default_catalog(
+        config_path: &Path,
+        auth_path: &Path,
+    ) -> anyhow::Result<ProviderRegistry> {
+        load_codex_config_providers(config_path, auth_path, &ModelCatalog::default())
+    }
+
+    fn gpt_5_6_catalog() -> ModelCatalog {
+        ModelCatalog::from_json(
+            r#"{"models":[
+          {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+          {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+        ]}"#,
+        )
+        .unwrap()
+    }
 
     #[test]
     fn loads_providers_from_codex_config() {
@@ -44,7 +61,7 @@ requires_openai_auth = false
         .unwrap();
         fs::write(&auth_path, r#"{"OPENAI_API_KEY":"sk-global"}"#).unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.model.as_deref(), Some("gpt-5.5"));
@@ -96,7 +113,7 @@ requires_openai_auth = true
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key, None);
@@ -115,7 +132,7 @@ requires_openai_auth = true
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("openai").unwrap();
 
         assert_eq!(registry.providers.len(), 1);
@@ -137,7 +154,7 @@ requires_openai_auth = true
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("openai").unwrap();
 
         assert_eq!(registry.providers.len(), 1);
@@ -172,7 +189,7 @@ requires_openai_auth = false
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key.as_deref(), Some("sk-env-loaded"));
@@ -211,7 +228,7 @@ requires_openai_auth = false
         .unwrap();
         fs::write(&auth_path, r#"{"OPENAI_API_KEY":"sk-global-auth"}"#).unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key.as_deref(), Some("sk-provider-env"));
@@ -242,7 +259,7 @@ requires_openai_auth = false
         .unwrap();
         fs::write(&auth_path, r#"{"OPENAI_API_KEY":"sk-global-auth"}"#).unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key, None);
@@ -273,11 +290,69 @@ requires_openai_auth = true
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key, None);
         assert_eq!(provider.env_key, None);
+        assert_eq!(provider.auth_mode, ProviderAuthMode::OpenAi);
+    }
+
+    #[test]
+    fn imports_supported_gpt_5_6_efforts_for_custom_provider() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "ultra"
+plan_mode_reasoning_effort = "max"
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+        let provider = registry.providers.get("switcher").unwrap();
+
+        assert_eq!(provider.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(provider.reasoning_effort.as_deref(), Some("ultra"));
+        assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("max"));
+    }
+
+    #[test]
+    fn synthesized_openai_inherits_top_level_model_and_efforts() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "ultra"
+plan_mode_reasoning_effort = "max"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &auth_path,
+            r#"{"auth_mode":"chatgpt","OPENAI_API_KEY":null,"tokens":{"access_token":"chatgpt-access-token"}}"#,
+        )
+        .unwrap();
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+        let provider = registry.providers.get("openai").unwrap();
+
+        assert_eq!(provider.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(provider.reasoning_effort.as_deref(), Some("ultra"));
+        assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("max"));
         assert_eq!(provider.auth_mode, ProviderAuthMode::OpenAi);
     }
 }

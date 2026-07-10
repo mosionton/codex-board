@@ -15,7 +15,5 @@ pub use model_catalog::{ModelCatalog, ModelCatalogLoad, ReasoningProfile};
 pub use models::fetch_provider_models;
 use registry::validate_provider_definition;
 pub use registry::{
-    CONFIG_FILE_NAME, DEFAULT_REASONING_EFFORT, PLAN_REASONING_EFFORT_OPTIONS, ProviderAuthMode,
-    ProviderConfig, ProviderRegistry, REASONING_EFFORT_OPTIONS, config_path,
-    normalize_reasoning_effort,
+    CONFIG_FILE_NAME, ProviderAuthMode, ProviderConfig, ProviderRegistry, config_path,
 };

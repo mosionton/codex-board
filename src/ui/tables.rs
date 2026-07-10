@@ -138,13 +138,14 @@ fn short_session_id(session_id: &str) -> String {
 
 pub(super) fn draw_providers(frame: &mut ratatui::Frame<'_>, app: &mut App, area: Rect) {
     let ids = app.provider_ids();
+    let model_catalog = app.providers.model_catalog();
     let mut rows = ids
         .iter()
         .map(|id| {
             let provider = app.providers.provider(id).expect("provider id exists");
             let is_applied = app.providers.is_applied(id);
             Row::new(
-                provider_display_items(id, provider, is_applied)
+                provider_display_items(id, provider, is_applied, model_catalog.as_ref())
                     .into_iter()
                     .enumerate()
                     .map(|(index, (_, value))| {

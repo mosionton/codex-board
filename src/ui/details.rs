@@ -8,7 +8,7 @@ use ratatui::{
 use crate::{
     app::{App, Page, provider_api_key_display, provider_auth_mode_display},
     claude_store::ClaudeStatus,
-    provider_config::{ProviderConfig, normalize_reasoning_effort},
+    provider_config::{ModelCatalog, ProviderConfig},
 };
 
 use super::layout::{centered_rect_size, details_dialog_height, percent_len, wrap_text};
@@ -112,7 +112,11 @@ pub(super) fn selected_provider_details(app: &App, width: usize) -> Vec<Line<'st
         return vec![Line::raw("No provider selected.")];
     };
     let is_applied = app.providers.is_applied(&id);
-    detail_lines(provider_display_items(&id, provider, is_applied), width)
+    let model_catalog = app.providers.model_catalog();
+    detail_lines(
+        provider_display_items(&id, provider, is_applied, model_catalog.as_ref()),
+        width,
+    )
 }
 
 fn claude_status_details(status: &ClaudeStatus, width: usize) -> Vec<Line<'static>> {
@@ -148,7 +152,13 @@ pub(super) fn provider_display_items(
     id: &str,
     provider: &ProviderConfig,
     is_applied: bool,
+    model_catalog: &ModelCatalog,
 ) -> [(&'static str, String); 9] {
+    let model = provider.model.as_deref();
+    let reasoning_effort =
+        model_catalog.normalize_effort(model, provider.reasoning_effort.as_deref());
+    let plan_reasoning_effort =
+        model_catalog.normalize_effort(model, provider.plan_reasoning_effort.as_deref());
     [
         ("id", id.to_string()),
         (
@@ -169,14 +179,8 @@ pub(super) fn provider_display_items(
         ),
         ("base_url", provider.base_url.clone()),
         ("wire_api", provider.wire_api.clone()),
-        (
-            "reason",
-            normalize_reasoning_effort(provider.reasoning_effort.as_deref()).to_string(),
-        ),
-        (
-            "plan_reason",
-            normalize_reasoning_effort(provider.plan_reasoning_effort.as_deref()).to_string(),
-        ),
+        ("reason", reasoning_effort),
+        ("plan_reason", plan_reasoning_effort),
         ("api_key", provider_api_key_display(provider)),
     ]
 }

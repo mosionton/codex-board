@@ -242,6 +242,7 @@ impl App {
     }
 
     pub(crate) fn apply_provider(&mut self, id: &str) {
+        let model_catalog = self.providers.model_catalog();
         let Some(provider) = self.providers.registry.providers.get(id) else {
             self.show_error("No provider selected.");
             return;
@@ -250,6 +251,7 @@ impl App {
             id,
             provider,
             self.providers.codex_config_path(),
+            model_catalog.as_ref(),
         ) {
             self.show_error(format!("Failed to apply provider: {err}"));
             return;

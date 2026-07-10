@@ -400,7 +400,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use crate::provider_config::{DEFAULT_REASONING_EFFORT, ModelCatalog};
+    use crate::provider_config::ModelCatalog;
 
     fn gpt_5_6_catalog() -> Arc<ModelCatalog> {
         Arc::new(
@@ -492,7 +492,7 @@ mod tests {
             editor.base_url.cursor(),
             "https://api.example.test/v1".chars().count()
         );
-        assert_eq!(editor.reasoning_effort, DEFAULT_REASONING_EFFORT);
+        assert_eq!(editor.reasoning_effort, "medium");
         assert_eq!(editor.plan_reasoning_effort, "high");
     }
 
@@ -529,7 +529,7 @@ mod tests {
         editor.reasoning_effort = "xhigh".to_string();
         editor.active_field = ProviderField::ReasoningEffort;
         editor.clear_active_field();
-        assert_eq!(editor.reasoning_effort, DEFAULT_REASONING_EFFORT);
+        assert_eq!(editor.reasoning_effort, "medium");
 
         editor.wire_api = "chat".to_string();
         editor.active_field = ProviderField::WireApi;

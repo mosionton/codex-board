@@ -4,10 +4,10 @@ use anyhow::{Context, Result, anyhow, bail};
 use toml_edit::{DocumentMut, Item, Table, value};
 
 use super::{
-    ProviderConfig,
+    ModelCatalog, ProviderConfig,
     auth::{load_env_key_value, normalize_env_key},
     file_io::write_file_atomic,
-    normalize_reasoning_effort, validate_provider_definition,
+    validate_provider_definition,
 };
 
 const OPENAI_PROVIDER_ID: &str = "openai";
@@ -26,6 +26,7 @@ pub fn apply_provider_to_codex(
     id: &str,
     provider: &ProviderConfig,
     config_path: &Path,
+    model_catalog: &ModelCatalog,
 ) -> Result<()> {
     validate_provider_definition(id, provider)?;
     if !provider.auth_mode.requires_openai_auth() {
@@ -46,10 +47,15 @@ pub fn apply_provider_to_codex(
         }
     }
 
-    write_codex_config(id, provider, config_path)
+    write_codex_config(id, provider, config_path, model_catalog)
 }
 
-fn write_codex_config(id: &str, provider: &ProviderConfig, path: &Path) -> Result<()> {
+fn write_codex_config(
+    id: &str,
+    provider: &ProviderConfig,
+    path: &Path,
+    model_catalog: &ModelCatalog,
+) -> Result<()> {
     let text = if path.exists() {
         fs::read_to_string(path)
             .with_context(|| format!("failed to read Codex config {}", path.display()))?
@@ -60,20 +66,24 @@ fn write_codex_config(id: &str, provider: &ProviderConfig, path: &Path) -> Resul
         .parse::<DocumentMut>()
         .with_context(|| format!("failed to parse Codex config {}", path.display()))?;
 
-    doc["model_provider"] = value(id);
-    if let Some(model) = provider
+    let provider_model = provider
         .model
         .as_deref()
-        .filter(|model| !model.trim().is_empty())
-    {
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+    let existing_model = doc.get("model").and_then(Item::as_str);
+    let effective_model = provider_model.or(existing_model);
+    let reasoning_effort =
+        model_catalog.normalize_effort(effective_model, provider.reasoning_effort.as_deref());
+    let plan_reasoning_effort =
+        model_catalog.normalize_effort(effective_model, provider.plan_reasoning_effort.as_deref());
+
+    doc["model_provider"] = value(id);
+    if let Some(model) = provider_model {
         doc["model"] = value(model);
     }
-    doc["model_reasoning_effort"] = value(normalize_reasoning_effort(
-        provider.reasoning_effort.as_deref(),
-    ));
-    doc["plan_mode_reasoning_effort"] = value(normalize_reasoning_effort(
-        provider.plan_reasoning_effort.as_deref(),
-    ));
+    doc["model_reasoning_effort"] = value(reasoning_effort);
+    doc["plan_mode_reasoning_effort"] = value(plan_reasoning_effort);
 
     if id == OPENAI_PROVIDER_ID {
         remove_model_providers_table(&mut doc)?;
@@ -165,8 +175,26 @@ mod tests {
     use std::{env, fs};
 
     use super::*;
-    use crate::provider_config::ProviderAuthMode;
+    use crate::provider_config::{ModelCatalog, ProviderAuthMode};
     use tempfile::tempdir;
+
+    fn gpt_5_6_catalog() -> ModelCatalog {
+        ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+              {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+            ]}"#,
+        )
+        .unwrap()
+    }
+
+    fn apply_with_default_catalog(
+        id: &str,
+        provider: &ProviderConfig,
+        config_path: &Path,
+    ) -> anyhow::Result<()> {
+        apply_provider_to_codex(id, provider, config_path, &ModelCatalog::default())
+    }
 
     #[test]
     fn writes_config_and_auth() {
@@ -185,7 +213,7 @@ mod tests {
             auth_mode: ProviderAuthMode::ApiKey,
         };
 
-        apply_provider_to_codex("switcher", &provider, &config_path).unwrap();
+        apply_with_default_catalog("switcher", &provider, &config_path).unwrap();
 
         let config = fs::read_to_string(&config_path).unwrap();
         let doc = toml::from_str::<toml::Value>(&config).unwrap();
@@ -274,7 +302,7 @@ wire_api = "responses"
             auth_mode: ProviderAuthMode::ApiKey,
         };
 
-        apply_provider_to_codex("switcher", &provider, &config_path).unwrap();
+        apply_with_default_catalog("switcher", &provider, &config_path).unwrap();
 
         let config = fs::read_to_string(&config_path).unwrap();
         let doc = toml::from_str::<toml::Value>(&config).unwrap();
@@ -317,7 +345,7 @@ plan_mode_reasoning_effort = "xhigh"
             auth_mode: ProviderAuthMode::ApiKey,
         };
 
-        apply_provider_to_codex("switcher", &provider, &config_path).unwrap();
+        apply_with_default_catalog("switcher", &provider, &config_path).unwrap();
 
         let config = fs::read_to_string(&config_path).unwrap();
         let doc = toml::from_str::<toml::Value>(&config).unwrap();
@@ -337,8 +365,9 @@ plan_mode_reasoning_effort = "xhigh"
     fn requires_api_key() {
         let dir = tempdir().unwrap();
         let provider = ProviderConfig::new("https://api.example.test/v1", "responses");
-        let err = apply_provider_to_codex("switcher", &provider, &dir.path().join("config.toml"))
-            .unwrap_err();
+        let err =
+            apply_with_default_catalog("switcher", &provider, &dir.path().join("config.toml"))
+                .unwrap_err();
 
         assert!(err.to_string().contains("api_key or env_key is required"));
     }
@@ -357,7 +386,7 @@ plan_mode_reasoning_effort = "xhigh"
             auth_mode: ProviderAuthMode::ApiKey,
         };
 
-        let err = apply_provider_to_codex(
+        let err = apply_with_default_catalog(
             OPENAI_PROVIDER_ID,
             &provider,
             &dir.path().join("config.toml"),
@@ -400,7 +429,7 @@ wire_api = "responses"
             auth_mode: ProviderAuthMode::OpenAi,
         };
 
-        apply_provider_to_codex(OPENAI_PROVIDER_ID, &provider, &config_path).unwrap();
+        apply_with_default_catalog(OPENAI_PROVIDER_ID, &provider, &config_path).unwrap();
 
         let config = fs::read_to_string(&config_path).unwrap();
         let doc = toml::from_str::<toml::Value>(&config).unwrap();
@@ -430,7 +459,7 @@ wire_api = "responses"
             auth_mode: ProviderAuthMode::OpenAi,
         };
 
-        apply_provider_to_codex("switcher", &provider, &config_path).unwrap();
+        apply_with_default_catalog("switcher", &provider, &config_path).unwrap();
 
         let config = fs::read_to_string(&config_path).unwrap();
         let doc = toml::from_str::<toml::Value>(&config).unwrap();
@@ -464,7 +493,7 @@ wire_api = "responses"
             auth_mode: ProviderAuthMode::OpenAi,
         };
 
-        apply_provider_to_codex("switcher", &provider, &config_path).unwrap();
+        apply_with_default_catalog("switcher", &provider, &config_path).unwrap();
 
         let config = fs::read_to_string(&config_path).unwrap();
         let doc = toml::from_str::<toml::Value>(&config).unwrap();
@@ -502,7 +531,7 @@ wire_api = "responses"
             auth_mode: ProviderAuthMode::ApiKey,
         };
 
-        apply_provider_to_codex("switcher", &provider, &config_path).unwrap();
+        apply_with_default_catalog("switcher", &provider, &config_path).unwrap();
 
         let config = fs::read_to_string(&config_path).unwrap();
         let doc = toml::from_str::<toml::Value>(&config).unwrap();
@@ -539,7 +568,7 @@ wire_api = "responses"
             auth_mode: ProviderAuthMode::ApiKey,
         };
 
-        apply_provider_to_codex("switcher", &provider, &config_path).unwrap();
+        apply_with_default_catalog("switcher", &provider, &config_path).unwrap();
 
         let config = fs::read_to_string(&config_path).unwrap();
         let doc = toml::from_str::<toml::Value>(&config).unwrap();
@@ -569,10 +598,52 @@ wire_api = "responses"
             auth_mode: ProviderAuthMode::ApiKey,
         };
 
-        let err = apply_provider_to_codex("switcher", &provider, &dir.path().join("config.toml"))
-            .unwrap_err();
+        let err =
+            apply_with_default_catalog("switcher", &provider, &dir.path().join("config.toml"))
+                .unwrap_err();
 
         assert!(err.to_string().contains("env_key"));
         assert!(err.to_string().contains("not set or empty"));
+    }
+
+    #[test]
+    fn writes_supported_gpt_5_6_efforts() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let provider = ProviderConfig {
+            model: Some("gpt-5.6-sol".to_string()),
+            reasoning_effort: Some("ultra".to_string()),
+            plan_reasoning_effort: Some("max".to_string()),
+            api_key: Some("sk-test".to_string()),
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+        apply_provider_to_codex("switcher", &provider, &config_path, &gpt_5_6_catalog()).unwrap();
+        let text = fs::read_to_string(&config_path).unwrap();
+        assert!(text.contains("model_reasoning_effort = \"ultra\""));
+        assert!(text.contains("plan_mode_reasoning_effort = \"max\""));
+    }
+
+    #[test]
+    fn empty_provider_model_uses_existing_codex_model_for_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(&config_path, "model = \"gpt-5.6-luna\"\n").unwrap();
+        let provider = ProviderConfig {
+            model: None,
+            reasoning_effort: Some("ultra".to_string()),
+            plan_reasoning_effort: Some("max".to_string()),
+            api_key: Some("sk-test".to_string()),
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+        apply_provider_to_codex("switcher", &provider, &config_path, &gpt_5_6_catalog()).unwrap();
+        let text = fs::read_to_string(&config_path).unwrap();
+        assert!(text.contains("model_reasoning_effort = \"medium\""));
+        assert!(text.contains("plan_mode_reasoning_effort = \"max\""));
     }
 }

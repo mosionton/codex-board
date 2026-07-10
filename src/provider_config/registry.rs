@@ -10,10 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::file_io::write_file_atomic;
 
 pub const CONFIG_FILE_NAME: &str = "switcher-providers.toml";
-pub const DEFAULT_REASONING_EFFORT: &str = "medium";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
-pub const REASONING_EFFORT_OPTIONS: &[&str] = &["low", "medium", "high", "xhigh"];
-pub const PLAN_REASONING_EFFORT_OPTIONS: &[&str] = &["low", "medium", "high", "xhigh"];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderRegistry {
@@ -246,18 +243,6 @@ impl ProviderConfig {
 #[must_use]
 pub fn config_path(codex_home: impl AsRef<Path>) -> PathBuf {
     codex_home.as_ref().join(CONFIG_FILE_NAME)
-}
-
-#[must_use]
-pub fn normalize_reasoning_effort(value: Option<&str>) -> &'static str {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return DEFAULT_REASONING_EFFORT;
-    };
-    REASONING_EFFORT_OPTIONS
-        .iter()
-        .copied()
-        .find(|option| *option == value)
-        .unwrap_or(DEFAULT_REASONING_EFFORT)
 }
 
 pub(super) fn validate_provider_id(id: &str) -> Result<()> {

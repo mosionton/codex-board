@@ -12,7 +12,7 @@ use crate::{
 
 use super::{details::provider_display_items, layout::centered_rect, layout::compact_path};
 
-pub(super) const PROVIDER_DISPLAY_LABELS: [&str; 9] = [
+pub(super) const PROVIDER_DISPLAY_LABELS: [&str; 10] = [
     "id",
     "status",
     "model",
@@ -21,10 +21,11 @@ pub(super) const PROVIDER_DISPLAY_LABELS: [&str; 9] = [
     "wire_api",
     "reason",
     "plan_reason",
+    "compact",
     "api_key",
 ];
 
-const PROVIDER_TABLE_WIDTHS: [Constraint; 9] = [
+const PROVIDER_TABLE_WIDTHS: [Constraint; 10] = [
     Constraint::Length(18),
     Constraint::Length(9),
     Constraint::Length(18),
@@ -33,6 +34,7 @@ const PROVIDER_TABLE_WIDTHS: [Constraint; 9] = [
     Constraint::Length(14),
     Constraint::Length(10),
     Constraint::Length(12),
+    Constraint::Length(9),
     Constraint::Length(16),
 ];
 
@@ -138,28 +140,36 @@ fn short_session_id(session_id: &str) -> String {
 
 pub(super) fn draw_providers(frame: &mut ratatui::Frame<'_>, app: &mut App, area: Rect) {
     let ids = app.provider_ids();
+    let model_catalog = app.providers.model_catalog();
+    let current_codex_model = app.providers.current_codex_model();
     let mut rows = ids
         .iter()
         .map(|id| {
             let provider = app.providers.provider(id).expect("provider id exists");
             let is_applied = app.providers.is_applied(id);
             Row::new(
-                provider_display_items(id, provider, is_applied)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, (_, value))| {
-                        if index == 0 {
-                            Cell::from(value).style(Style::default().fg(Color::Cyan))
-                        } else if index == 1 && is_applied {
-                            Cell::from(value).style(
-                                Style::default()
-                                    .fg(Color::Green)
-                                    .add_modifier(Modifier::BOLD),
-                            )
-                        } else {
-                            Cell::from(value)
-                        }
-                    }),
+                provider_display_items(
+                    id,
+                    provider,
+                    is_applied,
+                    model_catalog.as_ref(),
+                    current_codex_model,
+                )
+                .into_iter()
+                .enumerate()
+                .map(|(index, (_, value))| {
+                    if index == 0 {
+                        Cell::from(value).style(Style::default().fg(Color::Cyan))
+                    } else if index == 1 && is_applied {
+                        Cell::from(value).style(
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else {
+                        Cell::from(value)
+                    }
+                }),
             )
         })
         .collect::<Vec<_>>();
@@ -197,6 +207,10 @@ pub(super) fn draw_providers(frame: &mut ratatui::Frame<'_>, app: &mut App, area
 }
 
 fn claude_status_row(status: &ClaudeStatus) -> Row<'static> {
+    Row::new(claude_status_cells(status))
+}
+
+fn claude_status_cells(status: &ClaudeStatus) -> [Cell<'static>; 10] {
     let dash = || "-".to_string();
     let login = if status.logged_in() {
         Cell::from("login").style(
@@ -207,7 +221,7 @@ fn claude_status_row(status: &ClaudeStatus) -> Row<'static> {
     } else {
         Cell::from(dash())
     };
-    Row::new([
+    [
         Cell::from("claude").style(Style::default().fg(Color::Magenta)),
         login,
         Cell::from(status.model.clone().unwrap_or_else(dash)),
@@ -221,7 +235,8 @@ fn claude_status_row(status: &ClaudeStatus) -> Row<'static> {
         Cell::from(dash()),
         Cell::from(dash()),
         Cell::from(dash()),
-    ])
+        Cell::from(dash()),
+    ]
 }
 
 #[cfg(test)]
@@ -267,6 +282,14 @@ mod tests {
             session_source_label(&child, SessionViewMode::Flat, "├─ ", false),
             "sub Boole/worker"
         );
+    }
+
+    #[test]
+    fn claude_status_row_matches_provider_column_count() {
+        let status = ClaudeStatus::default();
+        let cells = claude_status_cells(&status);
+
+        assert_eq!(cells.len(), PROVIDER_DISPLAY_LABELS.len());
     }
 
     #[test]

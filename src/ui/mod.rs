@@ -152,7 +152,10 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &mut App) {
 mod tests {
     use super::*;
     use crate::{
-        provider_config::{ProviderAuthMode, ProviderConfig, ProviderRegistry},
+        provider_config::{
+            DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderConfig,
+            ProviderRegistry,
+        },
         session_store::{ConversationEntry, Session},
     };
     use std::path::{Path, PathBuf};
@@ -250,6 +253,7 @@ mod tests {
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: Some("high".to_string()),
             plan_reasoning_effort: None,
+            auto_compact_percent: 65,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
@@ -257,7 +261,8 @@ mod tests {
             auth_mode: ProviderAuthMode::ApiKey,
         };
 
-        let items = provider_display_items("switcher", &provider, true);
+        let items =
+            provider_display_items("switcher", &provider, true, &ModelCatalog::default(), None);
         let labels = items.iter().map(|(label, _)| *label).collect::<Vec<_>>();
 
         assert_eq!(labels, PROVIDER_DISPLAY_LABELS);
@@ -265,7 +270,118 @@ mod tests {
         assert_eq!(items[1].1, "applied");
         assert_eq!(items[2].1, "gpt-5.5");
         assert_eq!(items[3].1, "api_key");
-        assert_eq!(items[8].1, "s******t");
+        assert_eq!(items[8], ("compact", "65%".to_string()));
+        assert_eq!(items[9].1, "s******t");
+    }
+
+    #[test]
+    fn provider_details_preserve_supported_gpt_5_6_effort() {
+        let catalog = ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]}
+            ]}"#,
+        )
+        .unwrap();
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: Some("gpt-5.6-sol".to_string()),
+                    reasoning_effort: Some("ultra".to_string()),
+                    plan_reasoning_effort: Some("max".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+                    api_key: None,
+                    env_key: None,
+                    base_url: "https://example.test/v1".to_string(),
+                    wire_api: "responses".to_string(),
+                    auth_mode: ProviderAuthMode::ApiKey,
+                },
+            )
+            .unwrap();
+        let mut app =
+            app_with_sessions_and_registry(Vec::new(), PathBuf::from("/repo/current"), registry);
+        app.providers.set_model_catalog(catalog);
+
+        let text = selected_provider_details(&app, 80)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("reason     : ultra"));
+        assert!(text.contains("plan_reason: max"));
+        assert!(text.contains("compact    : 70%"));
+        assert!(!text.contains("reason     : medium"));
+    }
+
+    #[test]
+    fn provider_details_use_current_codex_model_when_provider_model_is_empty() {
+        let catalog = ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]}
+            ]}"#,
+        )
+        .unwrap();
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: None,
+                    reasoning_effort: Some("ultra".to_string()),
+                    plan_reasoning_effort: Some("max".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+                    api_key: None,
+                    env_key: None,
+                    base_url: "https://example.test/v1".to_string(),
+                    wire_api: "responses".to_string(),
+                    auth_mode: ProviderAuthMode::ApiKey,
+                },
+            )
+            .unwrap();
+        let mut app =
+            app_with_sessions_and_registry(Vec::new(), PathBuf::from("/repo/current"), registry);
+        app.providers.set_model_catalog(catalog);
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
+
+        let text = selected_provider_details(&app, 80)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("reason     : ultra"));
+        assert!(text.contains("plan_reason: max"));
+    }
+
+    #[test]
+    fn provider_details_normalize_empty_model_efforts_with_current_luna() {
+        let catalog = ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+            ]}"#,
+        )
+        .unwrap();
+        let provider = ProviderConfig {
+            model: None,
+            reasoning_effort: Some("ultra".to_string()),
+            plan_reasoning_effort: Some("max".to_string()),
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+            api_key: None,
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+
+        let items =
+            provider_display_items("switcher", &provider, false, &catalog, Some("gpt-5.6-luna"));
+
+        assert_eq!(items[2].1, "-");
+        assert_eq!(items[6].1, "medium");
+        assert_eq!(items[7].1, "max");
     }
 
     #[test]

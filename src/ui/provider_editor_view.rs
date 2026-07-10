@@ -5,10 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use crate::{
-    app::{ProviderEditor, ProviderField, WIRE_API_OPTIONS},
-    provider_config::{PLAN_REASONING_EFFORT_OPTIONS, REASONING_EFFORT_OPTIONS},
-};
+use crate::app::{ProviderEditor, ProviderField, WIRE_API_OPTIONS};
 
 use super::{
     input_view::{input_cursor_position_at, text_with_cursor_gap_spans},
@@ -56,6 +53,12 @@ pub(super) fn draw_provider_editor(
             ProviderField::PlanReasoningEffort,
             "plan_reason",
             empty_display(&editor.plan_reasoning_effort),
+        ),
+        provider_editor_line(
+            editor,
+            ProviderField::AutoCompactPercent,
+            "auto_compact",
+            editor.auto_compact_percent.as_str(),
         ),
         Line::raw(""),
     ];
@@ -126,6 +129,7 @@ const fn provider_editor_field_row(field: ProviderField) -> Option<u16> {
         ProviderField::BaseUrl => Some(2),
         ProviderField::ApiKey => Some(3),
         ProviderField::Model => Some(5),
+        ProviderField::AutoCompactPercent => Some(8),
         ProviderField::WireApi
         | ProviderField::Auth
         | ProviderField::ReasoningEffort
@@ -139,6 +143,10 @@ fn provider_editor_active_text(editor: &ProviderEditor) -> Option<(&str, usize)>
         ProviderField::BaseUrl => Some((editor.base_url.as_str(), editor.base_url.cursor())),
         ProviderField::ApiKey => Some((editor.api_key.as_str(), editor.api_key.cursor())),
         ProviderField::Model => Some((editor.model.as_str(), editor.model.cursor())),
+        ProviderField::AutoCompactPercent => Some((
+            editor.auto_compact_percent.as_str(),
+            editor.auto_compact_percent.cursor(),
+        )),
         ProviderField::WireApi
         | ProviderField::Auth
         | ProviderField::ReasoningEffort
@@ -166,19 +174,21 @@ fn provider_editor_options_line(editor: &ProviderEditor) -> Option<Line<'static>
         ));
     }
 
-    let options = provider_field_options(editor.active_field)?;
-    let text = options.join(" | ");
+    let text = provider_field_options_text(editor)?;
     Some(Line::styled(
         format!("Options: {text}"),
         Style::default().fg(Color::Gray),
     ))
 }
 
-const fn provider_field_options(field: ProviderField) -> Option<&'static [&'static str]> {
-    match field {
-        ProviderField::ReasoningEffort => Some(REASONING_EFFORT_OPTIONS),
-        ProviderField::PlanReasoningEffort => Some(PLAN_REASONING_EFFORT_OPTIONS),
-        ProviderField::WireApi => Some(WIRE_API_OPTIONS),
+fn provider_field_options_text(editor: &ProviderEditor) -> Option<String> {
+    match editor.active_field {
+        ProviderField::ReasoningEffort => Some(editor.reasoning_effort_options.join(" | ")),
+        ProviderField::PlanReasoningEffort => {
+            Some(editor.plan_reasoning_effort_options.join(" | "))
+        }
+        ProviderField::AutoCompactPercent => Some("1..99 percent | default 70".to_string()),
+        ProviderField::WireApi => Some(WIRE_API_OPTIONS.join(" | ")),
         ProviderField::Id
         | ProviderField::Model
         | ProviderField::ApiKey
@@ -189,7 +199,10 @@ const fn provider_field_options(field: ProviderField) -> Option<&'static [&'stat
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::provider_config::ModelCatalog;
 
     fn line_text(line: &Line<'_>) -> String {
         line.spans
@@ -213,6 +226,13 @@ mod tests {
         assert_eq!(
             provider_editor_cursor_position(popup, &editor),
             Some(Position::new(26, 7))
+        );
+
+        editor.auto_compact_percent.set_with_cursor("65", 1);
+        editor.active_field = ProviderField::AutoCompactPercent;
+        assert_eq!(
+            provider_editor_cursor_position(popup, &editor),
+            Some(Position::new(25, 13))
         );
     }
 
@@ -249,6 +269,28 @@ mod tests {
             None
         );
         assert_eq!(provider_editor_active_text(&editor), None);
+
+        editor.active_field = ProviderField::AutoCompactPercent;
+        let options_line = provider_editor_options_line(&editor).unwrap();
+        assert!(line_text(&options_line).contains("1..99 percent | default 70"));
+    }
+
+    #[test]
+    fn reasoning_options_follow_selected_model() {
+        let catalog = Arc::new(ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+              {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+            ]}"#,
+        ).unwrap());
+        let mut editor = ProviderEditor::new_with_catalog(catalog);
+        editor.model.set("gpt-5.6-sol");
+        editor.commit_model_change();
+        editor.active_field = ProviderField::ReasoningEffort;
+        assert!(line_text(&provider_editor_options_line(&editor).unwrap()).contains("max | ultra"));
+        editor.model.set("gpt-5.6-luna");
+        editor.commit_model_change();
+        assert!(!line_text(&provider_editor_options_line(&editor).unwrap()).contains("ultra"));
     }
 
     #[test]

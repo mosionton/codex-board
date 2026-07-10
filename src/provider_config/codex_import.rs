@@ -4,9 +4,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::{
-    DEFAULT_REASONING_EFFORT, ProviderAuthMode, ProviderConfig, ProviderRegistry,
+    DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderConfig, ProviderRegistry,
     auth::{CodexAuth, load_codex_auth, load_env_key_value, normalize_env_key},
-    normalize_reasoning_effort,
 };
 
 const OPENAI_PROVIDER_ID: &str = "openai";
@@ -23,6 +22,10 @@ struct CodexConfig {
     model_reasoning_effort: Option<String>,
     #[serde(default)]
     plan_mode_reasoning_effort: Option<String>,
+    #[serde(default)]
+    model_auto_compact_token_limit: Option<toml::Value>,
+    #[serde(default)]
+    model_auto_compact_token_limit_scope: Option<toml::Value>,
     #[serde(default)]
     model_providers: BTreeMap<String, CodexProviderConfig>,
 }
@@ -57,6 +60,22 @@ pub fn load_applied_model_provider(config_path: &Path) -> Result<Option<String>>
         .filter(|provider| !provider.is_empty()))
 }
 
+/// Loads the current top-level Codex model.
+///
+/// # Errors
+///
+/// Returns an error if the Codex config cannot be read or parsed.
+pub fn load_current_codex_model(config_path: &Path) -> Result<Option<String>> {
+    let Some(config) = load_codex_config(config_path)? else {
+        return Ok(None);
+    };
+
+    Ok(config
+        .model
+        .map(|model| model.trim().to_string())
+        .filter(|model| !model.is_empty()))
+}
+
 /// Loads provider definitions from Codex config and auth files.
 ///
 /// # Errors
@@ -66,18 +85,25 @@ pub fn load_applied_model_provider(config_path: &Path) -> Result<Option<String>>
 pub fn load_codex_config_providers(
     config_path: &Path,
     auth_path: &Path,
+    model_catalog: &ModelCatalog,
 ) -> Result<ProviderRegistry> {
     let codex_auth = load_codex_auth(auth_path)?;
     let codex_config = load_codex_config(config_path)?;
 
     let mut registry = ProviderRegistry::default();
     if let Some(codex_config) = codex_config {
+        let auto_compact_percent = imported_auto_compact_percent(&codex_config, model_catalog);
         let model = codex_config.model.clone();
-        let reasoning_effort =
-            normalize_reasoning_effort(codex_config.model_reasoning_effort.as_deref()).to_string();
-        let plan_reasoning_effort =
-            normalize_reasoning_effort(codex_config.plan_mode_reasoning_effort.as_deref())
-                .to_string();
+        let reasoning_effort = explicit_supported_effort(
+            model_catalog,
+            model.as_deref(),
+            codex_config.model_reasoning_effort.as_deref(),
+        );
+        let plan_reasoning_effort = explicit_supported_effort(
+            model_catalog,
+            model.as_deref(),
+            codex_config.plan_mode_reasoning_effort.as_deref(),
+        );
         for (id, provider) in codex_config.model_providers {
             if provider.base_url.is_none() || provider.wire_api.is_none() {
                 continue;
@@ -88,13 +114,30 @@ pub fn load_codex_config_providers(
                     model.clone(),
                     reasoning_effort.clone(),
                     plan_reasoning_effort.clone(),
+                    auto_compact_percent,
                     provider,
                 ),
             )?;
         }
+        add_openai_provider_for_openai_auth(
+            &mut registry,
+            &codex_auth,
+            model,
+            reasoning_effort,
+            plan_reasoning_effort,
+            auto_compact_percent,
+        )?;
+    } else {
+        add_openai_provider_for_openai_auth(
+            &mut registry,
+            &codex_auth,
+            None,
+            None,
+            None,
+            DEFAULT_AUTO_COMPACT_PERCENT,
+        )?;
     }
 
-    add_openai_provider_for_openai_auth(&mut registry, &codex_auth)?;
     Ok(registry)
 }
 
@@ -110,10 +153,34 @@ fn load_codex_config(config_path: &Path) -> Result<Option<CodexConfig>> {
         .with_context(|| format!("failed to parse Codex config {}", config_path.display()))
 }
 
+fn imported_auto_compact_percent(config: &CodexConfig, model_catalog: &ModelCatalog) -> u8 {
+    if config
+        .model_auto_compact_token_limit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.as_str().map(str::trim) != Some("total"))
+    {
+        return DEFAULT_AUTO_COMPACT_PERCENT;
+    }
+
+    let Some(token_limit) = config
+        .model_auto_compact_token_limit
+        .as_ref()
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| u64::try_from(value).ok())
+    else {
+        return DEFAULT_AUTO_COMPACT_PERCENT;
+    };
+
+    model_catalog
+        .auto_compact_percent(config.model.as_deref(), token_limit)
+        .unwrap_or(DEFAULT_AUTO_COMPACT_PERCENT)
+}
+
 fn imported_provider_config(
     model: Option<String>,
-    reasoning_effort: String,
-    plan_reasoning_effort: String,
+    reasoning_effort: Option<String>,
+    plan_reasoning_effort: Option<String>,
+    auto_compact_percent: u8,
     provider: CodexProviderConfig,
 ) -> ProviderConfig {
     let requires_openai_auth = provider.requires_openai_auth.unwrap_or(false);
@@ -133,8 +200,9 @@ fn imported_provider_config(
 
     ProviderConfig {
         model,
-        reasoning_effort: Some(reasoning_effort),
-        plan_reasoning_effort: Some(plan_reasoning_effort),
+        reasoning_effort,
+        plan_reasoning_effort,
+        auto_compact_percent,
         api_key,
         env_key,
         base_url: provider.base_url.unwrap_or_default(),
@@ -150,6 +218,10 @@ fn imported_provider_config(
 fn add_openai_provider_for_openai_auth(
     registry: &mut ProviderRegistry,
     auth: &CodexAuth,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+    plan_reasoning_effort: Option<String>,
+    auto_compact_percent: u8,
 ) -> Result<()> {
     if !auth.has_openai_auth {
         return Ok(());
@@ -161,9 +233,10 @@ fn add_openai_provider_for_openai_auth(
     registry.upsert(
         OPENAI_PROVIDER_ID,
         ProviderConfig {
-            model: None,
-            reasoning_effort: Some(DEFAULT_REASONING_EFFORT.to_string()),
-            plan_reasoning_effort: Some(DEFAULT_REASONING_EFFORT.to_string()),
+            model,
+            reasoning_effort,
+            plan_reasoning_effort,
+            auto_compact_percent,
             api_key: None,
             env_key: None,
             base_url: OPENAI_BASE_URL.to_string(),
@@ -171,4 +244,15 @@ fn add_openai_provider_for_openai_auth(
             auth_mode: ProviderAuthMode::OpenAi,
         },
     )
+}
+
+fn explicit_supported_effort(
+    model_catalog: &ModelCatalog,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Option<String> {
+    effort
+        .map(str::trim)
+        .filter(|effort| model_catalog.profile_for(model).supports(effort))
+        .map(ToString::to_string)
 }

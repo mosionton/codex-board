@@ -10,10 +10,14 @@ use serde::{Deserialize, Serialize};
 use super::file_io::write_file_atomic;
 
 pub const CONFIG_FILE_NAME: &str = "switcher-providers.toml";
-pub const DEFAULT_REASONING_EFFORT: &str = "medium";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
-pub const REASONING_EFFORT_OPTIONS: &[&str] = &["low", "medium", "high", "xhigh"];
-pub const PLAN_REASONING_EFFORT_OPTIONS: &[&str] = &["low", "medium", "high", "xhigh"];
+pub const DEFAULT_AUTO_COMPACT_PERCENT: u8 = 70;
+pub const MIN_AUTO_COMPACT_PERCENT: u8 = 1;
+pub const MAX_AUTO_COMPACT_PERCENT: u8 = 99;
+
+const fn default_auto_compact_percent() -> u8 {
+    DEFAULT_AUTO_COMPACT_PERCENT
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderRegistry {
@@ -39,6 +43,8 @@ pub struct ProviderConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub plan_reasoning_effort: Option<String>,
+    #[serde(default = "default_auto_compact_percent")]
+    pub auto_compact_percent: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -153,31 +159,6 @@ impl ProviderRegistry {
     pub fn merge_defaults(&mut self, other: Self) {
         for (id, provider) in other.providers {
             if let Some(current) = self.providers.get_mut(&id) {
-                if current
-                    .model
-                    .as_deref()
-                    .is_none_or(|model| model.trim().is_empty())
-                {
-                    current.model.clone_from(&provider.model);
-                }
-                if current
-                    .reasoning_effort
-                    .as_deref()
-                    .is_none_or(|reasoning| reasoning.trim().is_empty())
-                {
-                    current
-                        .reasoning_effort
-                        .clone_from(&provider.reasoning_effort);
-                }
-                if current
-                    .plan_reasoning_effort
-                    .as_deref()
-                    .is_none_or(|reasoning| reasoning.trim().is_empty())
-                {
-                    current
-                        .plan_reasoning_effort
-                        .clone_from(&provider.plan_reasoning_effort);
-                }
                 let missing_api_key = current
                     .api_key
                     .as_deref()
@@ -213,6 +194,7 @@ impl ProviderConfig {
             model: None,
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: None,
             env_key: None,
             base_url: base_url.into(),
@@ -231,8 +213,16 @@ impl ProviderConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error if required fields are empty.
+    /// Returns an error if the auto-compact percentage is outside the supported range or required
+    /// fields are empty.
     pub fn validate(&self) -> Result<()> {
+        if !(MIN_AUTO_COMPACT_PERCENT..=MAX_AUTO_COMPACT_PERCENT)
+            .contains(&self.auto_compact_percent)
+        {
+            bail!(
+                "auto_compact_percent must be between {MIN_AUTO_COMPACT_PERCENT} and {MAX_AUTO_COMPACT_PERCENT}"
+            );
+        }
         if self.base_url.trim().is_empty() {
             bail!("base_url is required");
         }
@@ -246,18 +236,6 @@ impl ProviderConfig {
 #[must_use]
 pub fn config_path(codex_home: impl AsRef<Path>) -> PathBuf {
     codex_home.as_ref().join(CONFIG_FILE_NAME)
-}
-
-#[must_use]
-pub fn normalize_reasoning_effort(value: Option<&str>) -> &'static str {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return DEFAULT_REASONING_EFFORT;
-    };
-    REASONING_EFFORT_OPTIONS
-        .iter()
-        .copied()
-        .find(|option| *option == value)
-        .unwrap_or(DEFAULT_REASONING_EFFORT)
 }
 
 pub(super) fn validate_provider_id(id: &str) -> Result<()> {
@@ -327,6 +305,76 @@ mod tests {
     }
 
     #[test]
+    fn missing_auto_compact_percent_uses_default() {
+        let dir = tempdir().unwrap();
+        let path = config_path(dir.path());
+        fs::write(
+            &path,
+            r#"
+[providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+
+        let registry = ProviderRegistry::load(&path).unwrap();
+
+        assert_eq!(
+            registry.providers["switcher"].auto_compact_percent,
+            DEFAULT_AUTO_COMPACT_PERCENT
+        );
+    }
+
+    #[test]
+    fn saves_auto_compact_percent_explicitly() {
+        let dir = tempdir().unwrap();
+        let path = config_path(dir.path());
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig::new("https://example.test/v1", "responses"),
+            )
+            .unwrap();
+
+        registry.save(&path).unwrap();
+
+        let text = fs::read_to_string(path).unwrap();
+        assert!(text.contains("auto_compact_percent = 70"));
+    }
+
+    #[test]
+    fn rejects_auto_compact_percent_outside_supported_range() {
+        for percent in [0, 100] {
+            let mut registry = ProviderRegistry::default();
+            let mut provider = ProviderConfig::new("https://example.test/v1", "responses");
+            provider.auto_compact_percent = percent;
+
+            let error = registry.upsert("switcher", provider).unwrap_err();
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("auto_compact_percent must be between 1 and 99")
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_auto_compact_percent_range_boundaries() {
+        for percent in [1, 99] {
+            let mut registry = ProviderRegistry::default();
+            let mut provider = ProviderConfig::new("https://example.test/v1", "responses");
+            provider.auto_compact_percent = percent;
+
+            registry
+                .upsert(format!("switcher-{percent}"), provider)
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn rejects_invalid_provider_config() {
         let mut registry = ProviderRegistry::default();
         assert!(
@@ -367,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_defaults_fills_missing_model_and_api_key() {
+    fn merge_defaults_preserves_empty_model_context_and_fills_credentials() {
         let mut current = ProviderRegistry::default();
         current
             .upsert(
@@ -376,6 +424,7 @@ mod tests {
                     model: None,
                     reasoning_effort: None,
                     plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: None,
                     env_key: None,
                     base_url: "https://local.example/v1".to_string(),
@@ -393,6 +442,7 @@ mod tests {
                     model: Some("gpt-5.5".to_string()),
                     reasoning_effort: Some("low".to_string()),
                     plan_reasoning_effort: Some("xhigh".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: Some("sk-test".to_string()),
                     env_key: Some("OPENAI_API_KEY".to_string()),
                     base_url: "https://remote.example/v1".to_string(),
@@ -405,9 +455,9 @@ mod tests {
         current.merge_defaults(imported);
         let provider = current.providers.get("switcher").unwrap();
 
-        assert_eq!(provider.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(provider.reasoning_effort.as_deref(), Some("low"));
-        assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("xhigh"));
+        assert_eq!(provider.model, None);
+        assert_eq!(provider.reasoning_effort, None);
+        assert_eq!(provider.plan_reasoning_effort, None);
         assert_eq!(provider.api_key.as_deref(), Some("sk-test"));
         assert_eq!(provider.env_key.as_deref(), Some("OPENAI_API_KEY"));
         assert_eq!(provider.base_url, "https://local.example/v1");

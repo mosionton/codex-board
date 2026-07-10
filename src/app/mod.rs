@@ -180,9 +180,10 @@ const fn cycle_index(current: usize, len: usize, delta: isize) -> usize {
 mod tests {
     use super::*;
     use crate::provider_config::{
-        PLAN_REASONING_EFFORT_OPTIONS, ProviderAuthMode, ProviderConfig, REASONING_EFFORT_OPTIONS,
+        DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderConfig,
     };
     use std::path::Path;
+    use std::sync::Arc;
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -289,11 +290,31 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_options_match_gpt_5_3_and_later_strengths() {
-        assert_eq!(REASONING_EFFORT_OPTIONS, ["low", "medium", "high", "xhigh"]);
+    fn reasoning_options_follow_editor_catalog() {
+        let catalog = Arc::new(
+            ModelCatalog::from_json(
+                r#"{"models":[
+                  {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]}
+                ]}"#,
+            )
+            .unwrap(),
+        );
+        let mut editor = ProviderEditor::new_with_catalog(catalog);
         assert_eq!(
-            PLAN_REASONING_EFFORT_OPTIONS,
+            editor.reasoning_effort_options,
             ["low", "medium", "high", "xhigh"]
+        );
+
+        editor.model.set("gpt-5.6-sol");
+        editor.commit_model_change();
+
+        assert_eq!(
+            editor.reasoning_effort_options,
+            ["low", "medium", "high", "xhigh", "max", "ultra"]
+        );
+        assert_eq!(
+            editor.plan_reasoning_effort_options,
+            editor.reasoning_effort_options
         );
     }
 
@@ -481,6 +502,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-auth-mode-must-not-display".to_string()),
             env_key: Some("OPENAI_API_KEY".to_string()),
             base_url: "https://api.example.test/v1".to_string(),
@@ -512,6 +534,7 @@ mod tests {
                     model: None,
                     reasoning_effort: None,
                     plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: Some("sk-test".to_string()),
                     env_key: None,
                     base_url: "https://api.example.test/v1".to_string(),
@@ -527,6 +550,7 @@ mod tests {
                     model: None,
                     reasoning_effort: None,
                     plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: None,
                     env_key: None,
                     base_url: "https://api.openai.com/v1".to_string(),
@@ -542,6 +566,7 @@ mod tests {
                     model: None,
                     reasoning_effort: None,
                     plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: None,
                     env_key: None,
                     base_url: "https://api.openai.com/v1".to_string(),
@@ -666,6 +691,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-loaded-from-env".to_string()),
             env_key: Some("CODEX_SWITCHER_TEST_PROVIDER_KEY".to_string()),
             base_url: "https://api.example.test/v1".to_string(),

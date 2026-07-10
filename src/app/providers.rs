@@ -67,7 +67,15 @@ impl App {
 
     pub(crate) fn start_new_provider(&mut self) {
         self.providers.model_fetch_task = None;
-        self.providers.editor = Some(ProviderEditor::new());
+        let model_catalog = self.providers.model_catalog();
+        let current_codex_model = self
+            .providers
+            .current_codex_model()
+            .map(ToString::to_string);
+        self.providers.editor = Some(ProviderEditor::new_with_catalog_and_current_model(
+            model_catalog,
+            current_codex_model,
+        ));
         self.overlay = Some(Overlay::ProviderEditor);
         self.clear_status();
     }
@@ -92,7 +100,19 @@ impl App {
             return;
         };
         self.providers.model_fetch_task = None;
-        self.providers.editor = Some(ProviderEditor::from_provider(&id, provider));
+        let model_catalog = self.providers.model_catalog();
+        let current_codex_model = self
+            .providers
+            .current_codex_model()
+            .map(ToString::to_string);
+        self.providers.editor = Some(
+            ProviderEditor::from_provider_with_catalog_and_current_model(
+                &id,
+                provider,
+                current_codex_model.as_deref(),
+                model_catalog,
+            ),
+        );
         self.overlay = Some(Overlay::ProviderEditor);
         self.clear_status();
     }
@@ -134,6 +154,9 @@ impl App {
     }
 
     pub(crate) fn prompt_save_provider_editor(&mut self) {
+        if let Some(editor) = self.providers.editor.as_mut() {
+            editor.commit_model_change();
+        }
         let Some(editor) = self.providers.editor.as_ref() else {
             return;
         };
@@ -233,6 +256,7 @@ impl App {
     }
 
     pub(crate) fn apply_provider(&mut self, id: &str) {
+        let model_catalog = self.providers.model_catalog();
         let Some(provider) = self.providers.registry.providers.get(id) else {
             self.show_error("No provider selected.");
             return;
@@ -241,11 +265,21 @@ impl App {
             id,
             provider,
             self.providers.codex_config_path(),
+            model_catalog.as_ref(),
         ) {
             self.show_error(format!("Failed to apply provider: {err}"));
             return;
         }
         self.providers.applied_provider_id = Some(id.to_string());
+        if let Some(model) = provider
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+        {
+            self.providers
+                .set_current_codex_model(Some(model.to_string()));
+        }
         self.show_status(format!("Applied provider '{id}' to Codex config."));
     }
 
@@ -253,6 +287,13 @@ impl App {
         self.providers.model_fetch_task = None;
         let Some(editor) = self.providers.editor.take() else {
             return;
+        };
+        let auto_compact_percent = match editor.parsed_auto_compact_percent() {
+            Ok(percent) => percent,
+            Err(err) => {
+                self.restore_provider_editor_with_error(editor, format!("Invalid provider: {err}"));
+                return;
+            }
         };
         let id = editor.id.trim().to_string();
         let original_provider = editor
@@ -268,6 +309,7 @@ impl App {
             model: empty_to_none(editor.model.as_str()),
             reasoning_effort: empty_to_none(&editor.reasoning_effort),
             plan_reasoning_effort: empty_to_none(&editor.plan_reasoning_effort),
+            auto_compact_percent,
             api_key,
             env_key,
             base_url: editor.base_url.trim().to_string(),
@@ -322,7 +364,9 @@ mod tests {
     use super::*;
     use std::{path::PathBuf, sync::mpsc};
 
-    use crate::provider_config::{ProviderAuthMode, ProviderRegistry};
+    use crate::provider_config::{
+        DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderRegistry,
+    };
     use tempfile::tempdir;
 
     fn test_provider() -> ProviderConfig {
@@ -330,12 +374,202 @@ mod tests {
             model: Some("gpt-5.5".to_string()),
             reasoning_effort: None,
             plan_reasoning_effort: None,
+            auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
             api_key: Some("sk-test".to_string()),
             env_key: None,
             base_url: "https://api.example.test/v1".to_string(),
             wire_api: "responses".to_string(),
             auth_mode: ProviderAuthMode::ApiKey,
         }
+    }
+
+    fn model_catalog() -> ModelCatalog {
+        ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]}
+            ]}"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn provider_editors_use_shared_model_catalog() {
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: Some("gpt-5.6-sol".to_string()),
+                    reasoning_effort: None,
+                    plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+                    ..test_provider()
+                },
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            PathBuf::from("providers.toml"),
+            PathBuf::from("config.toml"),
+            PathBuf::from("sessions"),
+        );
+        app.providers.set_model_catalog(model_catalog());
+
+        app.start_edit_provider();
+
+        let editor = app.providers.editor().unwrap();
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "low");
+    }
+
+    #[test]
+    fn provider_editor_uses_current_codex_model_when_provider_model_is_empty() {
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: None,
+                    reasoning_effort: Some("ultra".to_string()),
+                    plan_reasoning_effort: Some("max".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+                    ..test_provider()
+                },
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            PathBuf::from("providers.toml"),
+            PathBuf::from("config.toml"),
+            PathBuf::from("sessions"),
+        );
+        app.providers.set_model_catalog(model_catalog());
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
+
+        app.start_edit_provider();
+
+        let editor = app.providers.editor().unwrap();
+        assert_eq!(editor.model.as_str(), "");
+        assert_eq!(editor.reasoning_effort, "ultra");
+        assert_eq!(editor.plan_reasoning_effort, "max");
+    }
+
+    #[test]
+    fn saving_empty_provider_model_keeps_it_empty() {
+        let dir = tempdir().unwrap();
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: None,
+                    reasoning_effort: Some("ultra".to_string()),
+                    plan_reasoning_effort: Some("max".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+                    ..test_provider()
+                },
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            dir.path().join("providers.toml"),
+            dir.path().join("config.toml"),
+            dir.path().join("sessions"),
+        );
+        app.providers.set_model_catalog(model_catalog());
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
+        app.start_edit_provider();
+
+        app.save_provider_editor();
+
+        assert_eq!(app.providers.provider("switcher").unwrap().model, None);
+    }
+
+    #[test]
+    fn prompting_save_commits_manually_entered_model() {
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            ProviderRegistry::default(),
+            PathBuf::from("providers.toml"),
+            PathBuf::from("config.toml"),
+            PathBuf::from("sessions"),
+        );
+        app.providers.set_model_catalog(model_catalog());
+        app.start_new_provider();
+        let editor = app.providers.editor_mut().unwrap();
+        editor.id.set("switcher");
+        editor.model.set("gpt-5.6-sol");
+
+        app.prompt_save_provider_editor();
+
+        let editor = app.providers.editor().unwrap();
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "low");
+    }
+
+    fn app_with_registry_and_paths(registry: ProviderRegistry, root: &std::path::Path) -> App {
+        App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            root.join("providers.toml"),
+            root.join("config.toml"),
+            root.join("sessions"),
+        )
+    }
+
+    #[test]
+    fn saves_auto_compact_percent_from_editor() {
+        let dir = tempdir().unwrap();
+        let mut app = app_with_registry_and_paths(ProviderRegistry::default(), dir.path());
+        let mut editor = ProviderEditor::new();
+        editor.id.set("switcher");
+        editor.base_url.set("https://example.test/v1");
+        editor.api_key.set("sk-test");
+        editor.auto_compact_percent.set("65");
+        app.providers.editor = Some(editor);
+        app.overlay = Some(Overlay::ProviderEditor);
+
+        app.save_provider_editor();
+
+        assert_eq!(
+            app.providers.registry.providers["switcher"].auto_compact_percent,
+            65
+        );
+        assert_eq!(app.overlay, None);
+    }
+
+    #[test]
+    fn invalid_auto_compact_percent_keeps_editor_open() {
+        let dir = tempdir().unwrap();
+        let mut app = app_with_registry_and_paths(ProviderRegistry::default(), dir.path());
+        let mut editor = ProviderEditor::new();
+        editor.id.set("switcher");
+        editor.base_url.set("https://example.test/v1");
+        editor.api_key.set("sk-test");
+        editor.auto_compact_percent.set("100");
+        app.providers.editor = Some(editor);
+        app.overlay = Some(Overlay::ProviderEditor);
+
+        app.save_provider_editor();
+
+        assert!(app.providers.registry.providers.is_empty());
+        assert_eq!(app.overlay, Some(Overlay::ProviderEditor));
+        assert!(app.providers.editor.is_some());
+        assert!(
+            app.error
+                .as_deref()
+                .is_some_and(|error| error.contains("between 1 and 99"))
+        );
     }
 
     fn app_with_provider_count(count: usize) -> App {
@@ -458,6 +692,7 @@ mod tests {
                     model: Some("gpt-5.5".to_string()),
                     reasoning_effort: None,
                     plan_reasoning_effort: None,
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
                     api_key: Some("sk-test".to_string()),
                     env_key: None,
                     base_url: "https://api.example.test/v1".to_string(),
@@ -474,6 +709,8 @@ mod tests {
             dir.path().join("config.toml"),
             dir.path().join("sessions"),
         );
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
 
         app.apply_provider("switcher");
 
@@ -481,6 +718,50 @@ mod tests {
             app.providers.applied_provider_id.as_deref(),
             Some("switcher")
         );
+        assert_eq!(app.providers.current_codex_model(), Some("gpt-5.5"));
         assert_eq!(app.status, "Applied provider 'switcher' to Codex config.");
+    }
+
+    #[test]
+    fn apply_provider_with_empty_model_preserves_current_codex_model() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(&config_path, "model = \"gpt-5.6-sol\"\n").unwrap();
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: None,
+                    reasoning_effort: Some("ultra".to_string()),
+                    plan_reasoning_effort: Some("max".to_string()),
+                    auto_compact_percent: DEFAULT_AUTO_COMPACT_PERCENT,
+                    api_key: Some("sk-test".to_string()),
+                    env_key: None,
+                    base_url: "https://api.example.test/v1".to_string(),
+                    wire_api: "responses".to_string(),
+                    auth_mode: ProviderAuthMode::ApiKey,
+                },
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            dir.path().join("providers.toml"),
+            config_path,
+            dir.path().join("sessions"),
+        );
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
+        app.providers.set_model_catalog(model_catalog());
+
+        app.apply_provider("switcher");
+
+        assert_eq!(app.providers.current_codex_model(), Some("gpt-5.6-sol"));
+        assert_eq!(
+            app.providers.applied_provider_id.as_deref(),
+            Some("switcher")
+        );
     }
 }

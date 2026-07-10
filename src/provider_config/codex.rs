@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-pub use super::codex_import::{load_applied_model_provider, load_codex_config_providers};
+pub use super::codex_import::{
+    load_applied_model_provider, load_codex_config_providers, load_current_codex_model,
+};
 
 #[must_use]
 pub fn codex_config_path(codex_home: impl AsRef<Path>) -> PathBuf {
@@ -14,11 +16,34 @@ pub fn codex_auth_path(codex_home: impl AsRef<Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs};
+    use std::{env, fs, sync::Arc};
 
     use super::*;
-    use crate::provider_config::ProviderAuthMode;
+    use crate::{
+        app::ProviderEditor,
+        provider_config::{
+            DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderRegistry,
+        },
+    };
     use tempfile::tempdir;
+
+    fn load_with_default_catalog(
+        config_path: &Path,
+        auth_path: &Path,
+    ) -> anyhow::Result<ProviderRegistry> {
+        load_codex_config_providers(config_path, auth_path, &ModelCatalog::default())
+    }
+
+    fn gpt_5_6_catalog() -> ModelCatalog {
+        ModelCatalog::from_json(
+            r#"{"models":[
+          {"slug":"gpt-5.6-sol","context_window":372000,"default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+          {"slug":"gpt-5.6-terra","context_window":372000,"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+          {"slug":"gpt-5.6-luna","context_window":372000,"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+        ]}"#,
+        )
+        .unwrap()
+    }
 
     #[test]
     fn loads_providers_from_codex_config() {
@@ -44,12 +69,13 @@ requires_openai_auth = false
         .unwrap();
         fs::write(&auth_path, r#"{"OPENAI_API_KEY":"sk-global"}"#).unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(provider.reasoning_effort.as_deref(), Some("medium"));
         assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(provider.auto_compact_percent, DEFAULT_AUTO_COMPACT_PERCENT);
         assert_eq!(provider.api_key.as_deref(), Some("sk-test"));
         assert_eq!(provider.env_key.as_deref(), None);
         assert_eq!(provider.base_url, "https://api.example.test/v1");
@@ -68,6 +94,22 @@ requires_openai_auth = false
         assert_eq!(applied.as_deref(), Some("switcher"));
         assert_eq!(
             load_applied_model_provider(&dir.path().join("missing.toml")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn loads_current_codex_model_from_config() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(&config_path, "model = \" gpt-5.6-sol \"\n").unwrap();
+
+        assert_eq!(
+            load_current_codex_model(&config_path).unwrap().as_deref(),
+            Some("gpt-5.6-sol")
+        );
+        assert_eq!(
+            load_current_codex_model(&dir.path().join("missing.toml")).unwrap(),
             None
         );
     }
@@ -96,7 +138,7 @@ requires_openai_auth = true
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key, None);
@@ -115,7 +157,7 @@ requires_openai_auth = true
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("openai").unwrap();
 
         assert_eq!(registry.providers.len(), 1);
@@ -137,7 +179,7 @@ requires_openai_auth = true
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("openai").unwrap();
 
         assert_eq!(registry.providers.len(), 1);
@@ -172,7 +214,7 @@ requires_openai_auth = false
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key.as_deref(), Some("sk-env-loaded"));
@@ -211,7 +253,7 @@ requires_openai_auth = false
         .unwrap();
         fs::write(&auth_path, r#"{"OPENAI_API_KEY":"sk-global-auth"}"#).unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key.as_deref(), Some("sk-provider-env"));
@@ -242,7 +284,7 @@ requires_openai_auth = false
         .unwrap();
         fs::write(&auth_path, r#"{"OPENAI_API_KEY":"sk-global-auth"}"#).unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key, None);
@@ -273,11 +315,222 @@ requires_openai_auth = true
         )
         .unwrap();
 
-        let registry = load_codex_config_providers(&config_path, &auth_path).unwrap();
+        let registry = load_with_default_catalog(&config_path, &auth_path).unwrap();
         let provider = registry.providers.get("switcher").unwrap();
 
         assert_eq!(provider.api_key, None);
         assert_eq!(provider.env_key, None);
+        assert_eq!(provider.auth_mode, ProviderAuthMode::OpenAi);
+    }
+
+    #[test]
+    fn imports_supported_gpt_5_6_efforts_for_custom_provider() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "ultra"
+plan_mode_reasoning_effort = "max"
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+        let provider = registry.providers.get("switcher").unwrap();
+
+        assert_eq!(provider.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(provider.reasoning_effort.as_deref(), Some("ultra"));
+        assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("max"));
+    }
+
+    #[test]
+    fn imports_total_auto_compact_limit_as_percent() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_auto_compact_token_limit = 260400
+model_auto_compact_token_limit_scope = "total"
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+
+        assert_eq!(registry.providers["switcher"].auto_compact_percent, 70);
+    }
+
+    #[test]
+    fn imported_auto_compact_percent_rounds_down() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_auto_compact_token_limit = 260399
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+
+        assert_eq!(registry.providers["switcher"].auto_compact_percent, 69);
+    }
+
+    #[test]
+    fn unsafe_auto_compact_imports_use_default_percent() {
+        let cases = [
+            "model_auto_compact_token_limit = 0",
+            "model_auto_compact_token_limit = 372000",
+            "model_auto_compact_token_limit = -1",
+            "model_auto_compact_token_limit = \"bad\"",
+            "model_auto_compact_token_limit = 260400\nmodel_auto_compact_token_limit_scope = \"body_after_prefix\"",
+            "model_auto_compact_token_limit = 260400\nmodel_auto_compact_token_limit_scope = 7",
+        ];
+
+        for (index, compact_config) in cases.into_iter().enumerate() {
+            let dir = tempdir().unwrap();
+            let config_path = dir.path().join(format!("config-{index}.toml"));
+            let auth_path = dir.path().join("auth.json");
+            fs::write(
+                &config_path,
+                format!(
+                    "model = \"gpt-5.6-sol\"\n{compact_config}\n\n[model_providers.switcher]\nbase_url = \"https://example.test/v1\"\nwire_api = \"responses\"\n"
+                ),
+            )
+            .unwrap();
+
+            let registry =
+                load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+
+            assert_eq!(
+                registry.providers["switcher"].auto_compact_percent,
+                DEFAULT_AUTO_COMPACT_PERCENT
+            );
+        }
+    }
+
+    #[test]
+    fn imported_missing_efforts_follow_new_model_defaults_in_editor() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        let catalog = Arc::new(gpt_5_6_catalog());
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, catalog.as_ref()).unwrap();
+        let provider = registry.providers.get("switcher").unwrap();
+        assert_eq!(provider.reasoning_effort, None);
+        assert_eq!(provider.plan_reasoning_effort, None);
+
+        let mut editor = ProviderEditor::from_provider_with_catalog("switcher", provider, catalog);
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "low");
+        editor.model.set("gpt-5.6-terra");
+        editor.commit_model_change();
+
+        assert_eq!(editor.reasoning_effort, "medium");
+        assert_eq!(editor.plan_reasoning_effort, "medium");
+    }
+
+    #[test]
+    fn imported_explicit_and_invalid_efforts_remain_independent() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "low"
+plan_mode_reasoning_effort = "unsupported"
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        let catalog = Arc::new(gpt_5_6_catalog());
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, catalog.as_ref()).unwrap();
+        let provider = registry.providers.get("switcher").unwrap();
+        assert_eq!(provider.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(provider.plan_reasoning_effort, None);
+
+        let mut editor = ProviderEditor::from_provider_with_catalog("switcher", provider, catalog);
+        editor.model.set("gpt-5.6-terra");
+        editor.commit_model_change();
+
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "medium");
+    }
+
+    #[test]
+    fn synthesized_openai_inherits_top_level_model_and_efforts() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "ultra"
+plan_mode_reasoning_effort = "max"
+model_auto_compact_token_limit = 260399
+model_auto_compact_token_limit_scope = "total"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &auth_path,
+            r#"{"auth_mode":"chatgpt","OPENAI_API_KEY":null,"tokens":{"access_token":"chatgpt-access-token"}}"#,
+        )
+        .unwrap();
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, &gpt_5_6_catalog()).unwrap();
+        let provider = registry.providers.get("openai").unwrap();
+
+        assert_eq!(provider.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(provider.reasoning_effort.as_deref(), Some("ultra"));
+        assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("max"));
+        assert_eq!(provider.auto_compact_percent, 69);
         assert_eq!(provider.auth_mode, ProviderAuthMode::OpenAi);
     }
 }

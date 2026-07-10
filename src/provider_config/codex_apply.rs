@@ -6,6 +6,7 @@ use toml_edit::{DocumentMut, Item, Table, value};
 use super::{
     ModelCatalog, ProviderConfig,
     auth::{load_env_key_value, normalize_env_key},
+    effective_model,
     file_io::write_file_atomic,
     validate_provider_definition,
 };
@@ -72,7 +73,7 @@ fn write_codex_config(
         .map(str::trim)
         .filter(|model| !model.is_empty());
     let existing_model = doc.get("model").and_then(Item::as_str);
-    let effective_model = provider_model.or(existing_model);
+    let effective_model = effective_model(provider_model, existing_model);
     let reasoning_effort =
         model_catalog.normalize_effort(effective_model, provider.reasoning_effort.as_deref());
     let plan_reasoning_effort =
@@ -644,6 +645,30 @@ wire_api = "responses"
         apply_provider_to_codex("switcher", &provider, &config_path, &gpt_5_6_catalog()).unwrap();
         let text = fs::read_to_string(&config_path).unwrap();
         assert!(text.contains("model_reasoning_effort = \"medium\""));
+        assert!(text.contains("plan_mode_reasoning_effort = \"max\""));
+    }
+
+    #[test]
+    fn empty_provider_model_preserves_sol_efforts_and_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(&config_path, "model = \"gpt-5.6-sol\"\n").unwrap();
+        let provider = ProviderConfig {
+            model: None,
+            reasoning_effort: Some("ultra".to_string()),
+            plan_reasoning_effort: Some("max".to_string()),
+            api_key: Some("sk-test".to_string()),
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+
+        apply_provider_to_codex("switcher", &provider, &config_path, &gpt_5_6_catalog()).unwrap();
+
+        let text = fs::read_to_string(&config_path).unwrap();
+        assert!(text.contains("model = \"gpt-5.6-sol\""));
+        assert!(text.contains("model_reasoning_effort = \"ultra\""));
         assert!(text.contains("plan_mode_reasoning_effort = \"max\""));
     }
 }

@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-pub use super::codex_import::{load_applied_model_provider, load_codex_config_providers};
+pub use super::codex_import::{
+    load_applied_model_provider, load_codex_config_providers, load_current_codex_model,
+};
 
 #[must_use]
 pub fn codex_config_path(codex_home: impl AsRef<Path>) -> PathBuf {
@@ -14,10 +16,13 @@ pub fn codex_auth_path(codex_home: impl AsRef<Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs};
+    use std::{env, fs, sync::Arc};
 
     use super::*;
-    use crate::provider_config::{ModelCatalog, ProviderAuthMode, ProviderRegistry};
+    use crate::{
+        app::ProviderEditor,
+        provider_config::{ModelCatalog, ProviderAuthMode, ProviderRegistry},
+    };
     use tempfile::tempdir;
 
     fn load_with_default_catalog(
@@ -31,6 +36,7 @@ mod tests {
         ModelCatalog::from_json(
             r#"{"models":[
           {"slug":"gpt-5.6-sol","default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
+          {"slug":"gpt-5.6-terra","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},
           {"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
         ]}"#,
         )
@@ -85,6 +91,22 @@ requires_openai_auth = false
         assert_eq!(applied.as_deref(), Some("switcher"));
         assert_eq!(
             load_applied_model_provider(&dir.path().join("missing.toml")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn loads_current_codex_model_from_config() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(&config_path, "model = \" gpt-5.6-sol \"\n").unwrap();
+
+        assert_eq!(
+            load_current_codex_model(&config_path).unwrap().as_deref(),
+            Some("gpt-5.6-sol")
+        );
+        assert_eq!(
+            load_current_codex_model(&dir.path().join("missing.toml")).unwrap(),
             None
         );
     }
@@ -324,6 +346,74 @@ wire_api = "responses"
         assert_eq!(provider.model.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(provider.reasoning_effort.as_deref(), Some("ultra"));
         assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("max"));
+    }
+
+    #[test]
+    fn imported_missing_efforts_follow_new_model_defaults_in_editor() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        let catalog = Arc::new(gpt_5_6_catalog());
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, catalog.as_ref()).unwrap();
+        let provider = registry.providers.get("switcher").unwrap();
+        assert_eq!(provider.reasoning_effort, None);
+        assert_eq!(provider.plan_reasoning_effort, None);
+
+        let mut editor = ProviderEditor::from_provider_with_catalog("switcher", provider, catalog);
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "low");
+        editor.model.set("gpt-5.6-terra");
+        editor.commit_model_change();
+
+        assert_eq!(editor.reasoning_effort, "medium");
+        assert_eq!(editor.plan_reasoning_effort, "medium");
+    }
+
+    #[test]
+    fn imported_explicit_and_invalid_efforts_remain_independent() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &config_path,
+            r#"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "low"
+plan_mode_reasoning_effort = "unsupported"
+
+[model_providers.switcher]
+base_url = "https://example.test/v1"
+wire_api = "responses"
+"#,
+        )
+        .unwrap();
+        let catalog = Arc::new(gpt_5_6_catalog());
+
+        let registry =
+            load_codex_config_providers(&config_path, &auth_path, catalog.as_ref()).unwrap();
+        let provider = registry.providers.get("switcher").unwrap();
+        assert_eq!(provider.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(provider.plan_reasoning_effort, None);
+
+        let mut editor = ProviderEditor::from_provider_with_catalog("switcher", provider, catalog);
+        editor.model.set("gpt-5.6-terra");
+        editor.commit_model_change();
+
+        assert_eq!(editor.reasoning_effort, "low");
+        assert_eq!(editor.plan_reasoning_effort, "medium");
     }
 
     #[test]

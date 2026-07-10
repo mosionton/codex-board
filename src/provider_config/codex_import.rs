@@ -56,6 +56,22 @@ pub fn load_applied_model_provider(config_path: &Path) -> Result<Option<String>>
         .filter(|provider| !provider.is_empty()))
 }
 
+/// Loads the current top-level Codex model.
+///
+/// # Errors
+///
+/// Returns an error if the Codex config cannot be read or parsed.
+pub fn load_current_codex_model(config_path: &Path) -> Result<Option<String>> {
+    let Some(config) = load_codex_config(config_path)? else {
+        return Ok(None);
+    };
+
+    Ok(config
+        .model
+        .map(|model| model.trim().to_string())
+        .filter(|model| !model.is_empty()))
+}
+
 /// Loads provider definitions from Codex config and auth files.
 ///
 /// # Errors
@@ -73,11 +89,13 @@ pub fn load_codex_config_providers(
     let mut registry = ProviderRegistry::default();
     if let Some(codex_config) = codex_config {
         let model = codex_config.model.clone();
-        let reasoning_effort = model_catalog.normalize_effort(
+        let reasoning_effort = explicit_supported_effort(
+            model_catalog,
             model.as_deref(),
             codex_config.model_reasoning_effort.as_deref(),
         );
-        let plan_reasoning_effort = model_catalog.normalize_effort(
+        let plan_reasoning_effort = explicit_supported_effort(
+            model_catalog,
             model.as_deref(),
             codex_config.plan_mode_reasoning_effort.as_deref(),
         );
@@ -103,13 +121,7 @@ pub fn load_codex_config_providers(
             plan_reasoning_effort,
         )?;
     } else {
-        add_openai_provider_for_openai_auth(
-            &mut registry,
-            &codex_auth,
-            None,
-            model_catalog.normalize_effort(None, None),
-            model_catalog.normalize_effort(None, None),
-        )?;
+        add_openai_provider_for_openai_auth(&mut registry, &codex_auth, None, None, None)?;
     }
 
     Ok(registry)
@@ -129,8 +141,8 @@ fn load_codex_config(config_path: &Path) -> Result<Option<CodexConfig>> {
 
 fn imported_provider_config(
     model: Option<String>,
-    reasoning_effort: String,
-    plan_reasoning_effort: String,
+    reasoning_effort: Option<String>,
+    plan_reasoning_effort: Option<String>,
     provider: CodexProviderConfig,
 ) -> ProviderConfig {
     let requires_openai_auth = provider.requires_openai_auth.unwrap_or(false);
@@ -150,8 +162,8 @@ fn imported_provider_config(
 
     ProviderConfig {
         model,
-        reasoning_effort: Some(reasoning_effort),
-        plan_reasoning_effort: Some(plan_reasoning_effort),
+        reasoning_effort,
+        plan_reasoning_effort,
         api_key,
         env_key,
         base_url: provider.base_url.unwrap_or_default(),
@@ -168,8 +180,8 @@ fn add_openai_provider_for_openai_auth(
     registry: &mut ProviderRegistry,
     auth: &CodexAuth,
     model: Option<String>,
-    reasoning_effort: String,
-    plan_reasoning_effort: String,
+    reasoning_effort: Option<String>,
+    plan_reasoning_effort: Option<String>,
 ) -> Result<()> {
     if !auth.has_openai_auth {
         return Ok(());
@@ -182,8 +194,8 @@ fn add_openai_provider_for_openai_auth(
         OPENAI_PROVIDER_ID,
         ProviderConfig {
             model,
-            reasoning_effort: Some(reasoning_effort),
-            plan_reasoning_effort: Some(plan_reasoning_effort),
+            reasoning_effort,
+            plan_reasoning_effort,
             api_key: None,
             env_key: None,
             base_url: OPENAI_BASE_URL.to_string(),
@@ -191,4 +203,15 @@ fn add_openai_provider_for_openai_auth(
             auth_mode: ProviderAuthMode::OpenAi,
         },
     )
+}
+
+fn explicit_supported_effort(
+    model_catalog: &ModelCatalog,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Option<String> {
+    effort
+        .map(str::trim)
+        .filter(|effort| model_catalog.profile_for(model).supports(effort))
+        .map(ToString::to_string)
 }

@@ -28,6 +28,7 @@ pub fn run() -> Result<()> {
         &model_catalog_load.catalog,
     )?);
     let applied_provider_id = provider_config::load_applied_model_provider(&codex_config_path)?;
+    let current_codex_model = provider_config::load_current_codex_model(&codex_config_path)?;
 
     let sessions_dir = codex_home.join("sessions");
     let claude_config_dir = claude_config_dir();
@@ -49,6 +50,7 @@ pub fn run() -> Result<()> {
             .and_then(crate::claude_store::load_claude_status),
     );
     app.providers.set_model_catalog(model_catalog_load.catalog);
+    app.providers.set_current_codex_model(current_codex_model);
     if let Some(warning) = model_catalog_load.warning {
         app.show_status(warning);
     }

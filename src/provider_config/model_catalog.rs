@@ -6,6 +6,21 @@ use serde::Deserialize;
 const FALLBACK_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh"];
 const WARNING: &str = "Codex model catalog unavailable; using compatibility reasoning options.";
 
+#[must_use]
+pub fn effective_model<'a>(
+    provider_model: Option<&'a str>,
+    current_codex_model: Option<&'a str>,
+) -> Option<&'a str> {
+    provider_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .or_else(|| {
+            current_codex_model
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReasoningProfile {
     default_effort: String,
@@ -82,7 +97,10 @@ impl ModelCatalog {
             .context("failed to parse Codex model catalog")?;
         let mut profiles = BTreeMap::new();
 
-        for model in response.models {
+        for raw_model in response.models {
+            let Ok(model) = serde_json::from_value::<CatalogModel>(raw_model) else {
+                continue;
+            };
             let slug = model.slug.trim();
             let default_effort = model.default_reasoning_level.trim();
             let mut supported_efforts = Vec::new();
@@ -169,7 +187,7 @@ pub struct ModelCatalogLoad {
 
 #[derive(Debug, Deserialize)]
 struct CatalogResponse {
-    models: Vec<CatalogModel>,
+    models: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,6 +252,22 @@ mod tests {
         .unwrap();
         assert_eq!(catalog.profile_for(Some("valid")).default_effort(), "high");
         assert!(ModelCatalog::from_json(r#"{"models":[]}"#).is_err());
+    }
+
+    #[test]
+    fn keeps_valid_siblings_when_entries_are_structurally_malformed() {
+        let catalog = ModelCatalog::from_json(
+            r#"{"models":[
+              {"slug":"missing-default","supported_reasoning_levels":[{"effort":"medium"}]},
+              {"slug":"wrong-type","default_reasoning_level":7,"supported_reasoning_levels":"medium"},
+              {"slug":"valid","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}
+            ]}"#,
+        )
+        .unwrap();
+
+        let profile = catalog.profile_for(Some("valid"));
+        assert_eq!(profile.default_effort(), "high");
+        assert_eq!(profile.supported_efforts(), ["low", "high"]);
     }
 
     #[test]

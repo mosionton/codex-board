@@ -150,31 +150,6 @@ impl ProviderRegistry {
     pub fn merge_defaults(&mut self, other: Self) {
         for (id, provider) in other.providers {
             if let Some(current) = self.providers.get_mut(&id) {
-                if current
-                    .model
-                    .as_deref()
-                    .is_none_or(|model| model.trim().is_empty())
-                {
-                    current.model.clone_from(&provider.model);
-                }
-                if current
-                    .reasoning_effort
-                    .as_deref()
-                    .is_none_or(|reasoning| reasoning.trim().is_empty())
-                {
-                    current
-                        .reasoning_effort
-                        .clone_from(&provider.reasoning_effort);
-                }
-                if current
-                    .plan_reasoning_effort
-                    .as_deref()
-                    .is_none_or(|reasoning| reasoning.trim().is_empty())
-                {
-                    current
-                        .plan_reasoning_effort
-                        .clone_from(&provider.plan_reasoning_effort);
-                }
                 let missing_api_key = current
                     .api_key
                     .as_deref()
@@ -352,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_defaults_fills_missing_model_and_api_key() {
+    fn merge_defaults_preserves_empty_model_context_and_fills_credentials() {
         let mut current = ProviderRegistry::default();
         current
             .upsert(
@@ -390,9 +365,9 @@ mod tests {
         current.merge_defaults(imported);
         let provider = current.providers.get("switcher").unwrap();
 
-        assert_eq!(provider.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(provider.reasoning_effort.as_deref(), Some("low"));
-        assert_eq!(provider.plan_reasoning_effort.as_deref(), Some("xhigh"));
+        assert_eq!(provider.model, None);
+        assert_eq!(provider.reasoning_effort, None);
+        assert_eq!(provider.plan_reasoning_effort, None);
         assert_eq!(provider.api_key.as_deref(), Some("sk-test"));
         assert_eq!(provider.env_key.as_deref(), Some("OPENAI_API_KEY"));
         assert_eq!(provider.base_url, "https://local.example/v1");

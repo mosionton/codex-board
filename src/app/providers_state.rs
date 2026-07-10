@@ -20,6 +20,7 @@ pub struct ProvidersState {
     pub(super) model_fetch_task: Option<ModelFetchTask>,
     pub(super) claude_status: Option<ClaudeStatus>,
     pub(super) model_catalog: Arc<ModelCatalog>,
+    current_codex_model: Option<String>,
 }
 
 impl ProvidersState {
@@ -38,6 +39,7 @@ impl ProvidersState {
             model_fetch_task: None,
             claude_status: None,
             model_catalog: Arc::new(ModelCatalog::default()),
+            current_codex_model: None,
         }
     }
 
@@ -55,6 +57,16 @@ impl ProvidersState {
 
     pub(crate) fn set_model_catalog(&mut self, catalog: ModelCatalog) {
         self.model_catalog = Arc::new(catalog);
+    }
+
+    pub(crate) fn current_codex_model(&self) -> Option<&str> {
+        self.current_codex_model.as_deref()
+    }
+
+    pub(crate) fn set_current_codex_model(&mut self, model: Option<String>) {
+        self.current_codex_model = model
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty());
     }
 
     pub(crate) const fn registry(&self) -> &ProviderRegistry {
@@ -122,5 +134,18 @@ mod tests {
                 .default_effort(),
             "low"
         );
+    }
+
+    #[test]
+    fn stores_current_codex_model_context() {
+        let mut state = ProvidersState::new(
+            ProviderRegistry::default(),
+            PathBuf::from("providers.toml"),
+            PathBuf::from("config.toml"),
+        );
+
+        state.set_current_codex_model(Some(" gpt-5.6-sol ".to_string()));
+
+        assert_eq!(state.current_codex_model(), Some("gpt-5.6-sol"));
     }
 }

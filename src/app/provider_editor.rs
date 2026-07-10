@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::provider_config::{ModelCatalog, ProviderAuthMode, ProviderConfig, ReasoningProfile};
+use crate::provider_config::{
+    ModelCatalog, ProviderAuthMode, ProviderConfig, ReasoningProfile, effective_model,
+};
 
 use super::{TextField, cycle_index};
 
@@ -31,6 +33,7 @@ pub struct ProviderEditor {
     pub wire_api: String,
     pub auth_mode: ProviderAuthMode,
     model_catalog: Arc<ModelCatalog>,
+    current_codex_model: Option<String>,
     reasoning_effort_explicit: bool,
     plan_reasoning_effort_explicit: bool,
 }
@@ -47,7 +50,14 @@ impl ProviderEditor {
     }
 
     pub fn new_with_catalog(model_catalog: Arc<ModelCatalog>) -> Self {
-        let profile = model_catalog.profile_for(None);
+        Self::new_with_catalog_and_current_model(model_catalog, None)
+    }
+
+    pub fn new_with_catalog_and_current_model(
+        model_catalog: Arc<ModelCatalog>,
+        current_codex_model: Option<String>,
+    ) -> Self {
+        let profile = model_catalog.profile_for(current_codex_model.as_deref());
         Self {
             original_id: None,
             active_field: ProviderField::Id,
@@ -63,6 +73,7 @@ impl ProviderEditor {
             wire_api: "responses".to_string(),
             auth_mode: ProviderAuthMode::ApiKey,
             model_catalog,
+            current_codex_model,
             reasoning_effort_explicit: false,
             plan_reasoning_effort_explicit: false,
         }
@@ -81,8 +92,17 @@ impl ProviderEditor {
         provider: &ProviderConfig,
         model_catalog: Arc<ModelCatalog>,
     ) -> Self {
+        Self::from_provider_with_catalog_and_current_model(id, provider, None, model_catalog)
+    }
+
+    pub fn from_provider_with_catalog_and_current_model(
+        id: &str,
+        provider: &ProviderConfig,
+        current_codex_model: Option<&str>,
+        model_catalog: Arc<ModelCatalog>,
+    ) -> Self {
         let model = provider.model.clone().unwrap_or_default();
-        let profile = model_catalog.profile_for(Some(&model));
+        let profile = model_catalog.profile_for(effective_model(Some(&model), current_codex_model));
         let (reasoning_effort, reasoning_effort_explicit) =
             initial_effort(profile, provider.reasoning_effort.as_deref());
         let (plan_reasoning_effort, plan_reasoning_effort_explicit) =
@@ -108,6 +128,7 @@ impl ProviderEditor {
             wire_api: provider.wire_api.clone(),
             auth_mode: provider.auth_mode,
             model_catalog,
+            current_codex_model: current_codex_model.map(ToString::to_string),
             reasoning_effort_explicit,
             plan_reasoning_effort_explicit,
         }
@@ -162,12 +183,12 @@ impl ProviderEditor {
                 self.commit_model_change();
             }
             ProviderField::ReasoningEffort => {
-                let profile = self.model_catalog.profile_for(Some(self.model.as_str()));
+                let profile = self.current_profile();
                 self.reasoning_effort = profile.default_effort().to_string();
                 self.reasoning_effort_explicit = false;
             }
             ProviderField::PlanReasoningEffort => {
-                let profile = self.model_catalog.profile_for(Some(self.model.as_str()));
+                let profile = self.current_profile();
                 self.plan_reasoning_effort = profile.default_effort().to_string();
                 self.plan_reasoning_effort_explicit = false;
             }
@@ -233,10 +254,7 @@ impl ProviderEditor {
     }
 
     pub fn commit_model_change(&mut self) {
-        let profile = self
-            .model_catalog
-            .profile_for(Some(self.model.as_str()))
-            .clone();
+        let profile = self.current_profile().clone();
         self.reasoning_effort_options = profile.supported_efforts().to_vec();
         self.plan_reasoning_effort_options = profile.supported_efforts().to_vec();
         if !self.reasoning_effort_explicit || !profile.supports(&self.reasoning_effort) {
@@ -295,6 +313,13 @@ impl ProviderEditor {
 
     pub const fn auth_mode_display(&self) -> &'static str {
         self.auth_mode.as_str()
+    }
+
+    fn current_profile(&self) -> &ReasoningProfile {
+        self.model_catalog.profile_for(effective_model(
+            Some(self.model.as_str()),
+            self.current_codex_model.as_deref(),
+        ))
     }
 }
 
@@ -460,6 +485,66 @@ mod tests {
         editor.commit_model_change();
         assert_eq!(editor.reasoning_effort, "xhigh");
         assert_eq!(editor.plan_reasoning_effort, "medium");
+    }
+
+    #[test]
+    fn empty_provider_model_uses_current_sol_profile_without_persisting_model() {
+        let provider = ProviderConfig {
+            model: None,
+            reasoning_effort: Some("ultra".to_string()),
+            plan_reasoning_effort: Some("max".to_string()),
+            api_key: Some("sk-test".to_string()),
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+
+        let editor = ProviderEditor::from_provider_with_catalog_and_current_model(
+            "switcher",
+            &provider,
+            Some("gpt-5.6-sol"),
+            gpt_5_6_catalog(),
+        );
+
+        assert_eq!(editor.model.as_str(), "");
+        assert_eq!(editor.reasoning_effort, "ultra");
+        assert_eq!(editor.plan_reasoning_effort, "max");
+        assert!(
+            editor
+                .reasoning_effort_options
+                .contains(&"ultra".to_string())
+        );
+    }
+
+    #[test]
+    fn empty_provider_model_uses_current_luna_profile_per_effort() {
+        let provider = ProviderConfig {
+            model: None,
+            reasoning_effort: Some("ultra".to_string()),
+            plan_reasoning_effort: Some("max".to_string()),
+            api_key: Some("sk-test".to_string()),
+            env_key: None,
+            base_url: "https://example.test/v1".to_string(),
+            wire_api: "responses".to_string(),
+            auth_mode: ProviderAuthMode::ApiKey,
+        };
+
+        let editor = ProviderEditor::from_provider_with_catalog_and_current_model(
+            "switcher",
+            &provider,
+            Some("gpt-5.6-luna"),
+            gpt_5_6_catalog(),
+        );
+
+        assert_eq!(editor.model.as_str(), "");
+        assert_eq!(editor.reasoning_effort, "medium");
+        assert_eq!(editor.plan_reasoning_effort, "max");
+        assert!(
+            !editor
+                .reasoning_effort_options
+                .contains(&"ultra".to_string())
+        );
     }
 
     #[test]

@@ -113,8 +113,15 @@ pub(super) fn selected_provider_details(app: &App, width: usize) -> Vec<Line<'st
     };
     let is_applied = app.providers.is_applied(&id);
     let model_catalog = app.providers.model_catalog();
+    let current_codex_model = app.providers.current_codex_model();
     detail_lines(
-        provider_display_items(&id, provider, is_applied, model_catalog.as_ref()),
+        provider_display_items(
+            &id,
+            provider,
+            is_applied,
+            model_catalog.as_ref(),
+            current_codex_model,
+        ),
         width,
     )
 }
@@ -153,8 +160,10 @@ pub(super) fn provider_display_items(
     provider: &ProviderConfig,
     is_applied: bool,
     model_catalog: &ModelCatalog,
+    current_codex_model: Option<&str>,
 ) -> [(&'static str, String); 9] {
-    let model = provider.model.as_deref();
+    let model =
+        crate::provider_config::effective_model(provider.model.as_deref(), current_codex_model);
     let reasoning_effort =
         model_catalog.normalize_effort(model, provider.reasoning_effort.as_deref());
     let plan_reasoning_effort =

@@ -68,7 +68,14 @@ impl App {
     pub(crate) fn start_new_provider(&mut self) {
         self.providers.model_fetch_task = None;
         let model_catalog = self.providers.model_catalog();
-        self.providers.editor = Some(ProviderEditor::new_with_catalog(model_catalog));
+        let current_codex_model = self
+            .providers
+            .current_codex_model()
+            .map(ToString::to_string);
+        self.providers.editor = Some(ProviderEditor::new_with_catalog_and_current_model(
+            model_catalog,
+            current_codex_model,
+        ));
         self.overlay = Some(Overlay::ProviderEditor);
         self.clear_status();
     }
@@ -94,11 +101,18 @@ impl App {
         };
         self.providers.model_fetch_task = None;
         let model_catalog = self.providers.model_catalog();
-        self.providers.editor = Some(ProviderEditor::from_provider_with_catalog(
-            &id,
-            provider,
-            model_catalog,
-        ));
+        let current_codex_model = self
+            .providers
+            .current_codex_model()
+            .map(ToString::to_string);
+        self.providers.editor = Some(
+            ProviderEditor::from_provider_with_catalog_and_current_model(
+                &id,
+                provider,
+                current_codex_model.as_deref(),
+                model_catalog,
+            ),
+        );
         self.overlay = Some(Overlay::ProviderEditor);
         self.clear_status();
     }
@@ -257,6 +271,15 @@ impl App {
             return;
         }
         self.providers.applied_provider_id = Some(id.to_string());
+        if let Some(model) = provider
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+        {
+            self.providers
+                .set_current_codex_model(Some(model.to_string()));
+        }
         self.show_status(format!("Applied provider '{id}' to Codex config."));
     }
 
@@ -387,6 +410,73 @@ mod tests {
         let editor = app.providers.editor().unwrap();
         assert_eq!(editor.reasoning_effort, "low");
         assert_eq!(editor.plan_reasoning_effort, "low");
+    }
+
+    #[test]
+    fn provider_editor_uses_current_codex_model_when_provider_model_is_empty() {
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: None,
+                    reasoning_effort: Some("ultra".to_string()),
+                    plan_reasoning_effort: Some("max".to_string()),
+                    ..test_provider()
+                },
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            PathBuf::from("providers.toml"),
+            PathBuf::from("config.toml"),
+            PathBuf::from("sessions"),
+        );
+        app.providers.set_model_catalog(model_catalog());
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
+
+        app.start_edit_provider();
+
+        let editor = app.providers.editor().unwrap();
+        assert_eq!(editor.model.as_str(), "");
+        assert_eq!(editor.reasoning_effort, "ultra");
+        assert_eq!(editor.plan_reasoning_effort, "max");
+    }
+
+    #[test]
+    fn saving_empty_provider_model_keeps_it_empty() {
+        let dir = tempdir().unwrap();
+        let mut registry = ProviderRegistry::default();
+        registry
+            .upsert(
+                "switcher",
+                ProviderConfig {
+                    model: None,
+                    reasoning_effort: Some("ultra".to_string()),
+                    plan_reasoning_effort: Some("max".to_string()),
+                    ..test_provider()
+                },
+            )
+            .unwrap();
+        let mut app = App::new(
+            Vec::new(),
+            PathBuf::from("/repo/current"),
+            registry,
+            dir.path().join("providers.toml"),
+            dir.path().join("config.toml"),
+            dir.path().join("sessions"),
+        );
+        app.providers.set_model_catalog(model_catalog());
+        app.providers
+            .set_current_codex_model(Some("gpt-5.6-sol".to_string()));
+        app.start_edit_provider();
+
+        app.save_provider_editor();
+
+        assert_eq!(app.providers.provider("switcher").unwrap().model, None);
     }
 
     #[test]

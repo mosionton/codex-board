@@ -23,6 +23,8 @@ pub struct SessionsState {
     pub(super) visible_depths: Vec<usize>,
     pub(super) visible_tree_prefixes: Vec<String>,
     pub(super) visible_parent_links: Vec<bool>,
+    pub(super) visible_has_children: Vec<bool>,
+    pub(super) expanded_session_ids: HashSet<String>,
     pub(super) view_mode: SessionViewMode,
     pub(super) search: SearchState,
     pub(super) scope: Scope,
@@ -42,6 +44,8 @@ impl SessionsState {
             visible_depths: Vec::new(),
             visible_tree_prefixes: Vec::new(),
             visible_parent_links: Vec::new(),
+            visible_has_children: Vec::new(),
+            expanded_session_ids: HashSet::new(),
             view_mode: SessionViewMode::Tree,
             search: SearchState::default(),
             scope: Scope::CurrentDir,
@@ -178,6 +182,7 @@ impl SessionsState {
 
     fn rebuild_flat_visible(&mut self, candidates: Vec<usize>) {
         self.visible_parent_links = self.parent_link_flags(&candidates);
+        self.visible_has_children = vec![false; candidates.len()];
         self.visible_depths = vec![0; candidates.len()];
         self.visible_tree_prefixes = vec![String::new(); candidates.len()];
         self.visible_indices = candidates;
@@ -214,10 +219,10 @@ impl SessionsState {
             sort_session_indices(&self.items, child_indices);
         }
 
-        let mut rows = TreeRows::new(&children);
+        let mut rows = TreeRows::new(&self.items, &children, &self.expanded_session_ids);
         for root in roots {
             let show_parent_link = self.items[root].parent_thread_id.is_some();
-            rows.append(root, 0, "● ".to_string(), show_parent_link, "");
+            rows.append(root, 0, "", show_parent_link, "");
         }
 
         let mut remaining = candidate_set
@@ -227,15 +232,21 @@ impl SessionsState {
         sort_session_indices(&self.items, &mut remaining);
         for index in remaining {
             let show_parent_link = self.items[index].parent_thread_id.is_some();
-            rows.append(index, 0, "● ".to_string(), show_parent_link, "");
+            rows.append(index, 0, "", show_parent_link, "");
         }
 
-        let (visible_indices, visible_depths, visible_tree_prefixes, visible_parent_links) =
-            rows.into_parts();
+        let TreeRowParts {
+            indices: visible_indices,
+            depths: visible_depths,
+            tree_prefixes: visible_tree_prefixes,
+            parent_links: visible_parent_links,
+            has_children: visible_has_children,
+        } = rows.into_parts();
         self.visible_indices = visible_indices;
         self.visible_depths = visible_depths;
         self.visible_tree_prefixes = visible_tree_prefixes;
         self.visible_parent_links = visible_parent_links;
+        self.visible_has_children = visible_has_children;
     }
 
     fn parent_link_flags(&self, indices: &[usize]) -> Vec<bool> {
@@ -265,6 +276,29 @@ impl SessionsState {
 
     pub(crate) fn replace_items(&mut self, items: Vec<Session>) {
         self.items = items;
+        self.expanded_session_ids
+            .retain(|session_id| self.items.iter().any(|session| session.id == *session_id));
+    }
+
+    pub(crate) fn toggle_selected_expansion(&mut self) {
+        if self.view_mode != SessionViewMode::Tree
+            || !self
+                .visible_has_children
+                .get(self.selection_index())
+                .copied()
+                .unwrap_or_default()
+        {
+            return;
+        }
+
+        let Some(session_id) = self.selected_session().map(|session| session.id.clone()) else {
+            return;
+        };
+        if !self.expanded_session_ids.remove(&session_id) {
+            self.expanded_session_ids.insert(session_id.clone());
+        }
+        self.refresh_visible();
+        self.select_visible_session_by_id(&session_id);
     }
 
     pub(crate) fn select_visible_session_by_id(&mut self, session_id: &str) {
@@ -331,23 +365,41 @@ fn sort_session_indices(items: &[Session], indices: &mut [usize]) {
 }
 
 struct TreeRows<'a> {
+    items: &'a [Session],
     children: &'a HashMap<usize, Vec<usize>>,
+    expanded_session_ids: &'a HashSet<String>,
     visited: HashSet<usize>,
     visible_indices: Vec<usize>,
     visible_depths: Vec<usize>,
     visible_tree_prefixes: Vec<String>,
     visible_parent_links: Vec<bool>,
+    visible_has_children: Vec<bool>,
+}
+
+struct TreeRowParts {
+    indices: Vec<usize>,
+    depths: Vec<usize>,
+    tree_prefixes: Vec<String>,
+    parent_links: Vec<bool>,
+    has_children: Vec<bool>,
 }
 
 impl<'a> TreeRows<'a> {
-    fn new(children: &'a HashMap<usize, Vec<usize>>) -> Self {
+    fn new(
+        items: &'a [Session],
+        children: &'a HashMap<usize, Vec<usize>>,
+        expanded_session_ids: &'a HashSet<String>,
+    ) -> Self {
         Self {
+            items,
             children,
+            expanded_session_ids,
             visited: HashSet::new(),
             visible_indices: Vec::new(),
             visible_depths: Vec::new(),
             visible_tree_prefixes: Vec::new(),
             visible_parent_links: Vec::new(),
+            visible_has_children: Vec::new(),
         }
     }
 
@@ -359,19 +411,34 @@ impl<'a> TreeRows<'a> {
         &mut self,
         index: usize,
         depth: usize,
-        tree_prefix: String,
+        tree_prefix: &str,
         show_parent_link: bool,
         child_prefix_base: &str,
     ) {
         if !self.visited.insert(index) {
             return;
         }
+        let child_indices = self.children.get(&index);
+        let has_children = child_indices.is_some_and(|children| !children.is_empty());
+        let is_expanded = has_children
+            && self
+                .items
+                .get(index)
+                .is_some_and(|session| self.expanded_session_ids.contains(&session.id));
+        let node_marker = if has_children {
+            if is_expanded { "▾ " } else { "▸ " }
+        } else {
+            "● "
+        };
+
         self.visible_indices.push(index);
         self.visible_depths.push(depth);
-        self.visible_tree_prefixes.push(tree_prefix);
+        self.visible_tree_prefixes
+            .push(format!("{tree_prefix}{node_marker}"));
         self.visible_parent_links.push(show_parent_link);
+        self.visible_has_children.push(has_children);
 
-        if let Some(child_indices) = self.children.get(&index) {
+        if is_expanded && let Some(child_indices) = child_indices {
             for (child_position, child_index) in child_indices.iter().enumerate() {
                 let is_last = child_position + 1 == child_indices.len();
                 let connector = if is_last { "└─ " } else { "├─ " };
@@ -380,21 +447,34 @@ impl<'a> TreeRows<'a> {
                 self.append(
                     *child_index,
                     depth + 1,
-                    format!("{child_prefix_base}{connector}"),
+                    &format!("{child_prefix_base}{connector}"),
                     false,
                     &next_child_prefix,
                 );
             }
+        } else if has_children {
+            self.mark_descendants_visited(index);
         }
     }
 
-    fn into_parts(self) -> (Vec<usize>, Vec<usize>, Vec<String>, Vec<bool>) {
-        (
-            self.visible_indices,
-            self.visible_depths,
-            self.visible_tree_prefixes,
-            self.visible_parent_links,
-        )
+    fn mark_descendants_visited(&mut self, index: usize) {
+        if let Some(child_indices) = self.children.get(&index) {
+            for child_index in child_indices {
+                if self.visited.insert(*child_index) {
+                    self.mark_descendants_visited(*child_index);
+                }
+            }
+        }
+    }
+
+    fn into_parts(self) -> TreeRowParts {
+        TreeRowParts {
+            indices: self.visible_indices,
+            depths: self.visible_depths,
+            tree_prefixes: self.visible_tree_prefixes,
+            parent_links: self.visible_parent_links,
+            has_children: self.visible_has_children,
+        }
     }
 }
 
@@ -484,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn sessions_default_to_tree_view_and_order_children_after_parent() {
+    fn sessions_default_to_collapsed_tree_view_and_expand_selected_parent() {
         let current_dir = PathBuf::from("/repo/current");
         let mut parent = test_session("parent", current_dir.clone(), "alpha", "parent");
         parent.timestamp = "2026-06-24T10:00:00Z".into();
@@ -499,10 +579,23 @@ mod tests {
         state.refresh_visible();
 
         assert_eq!(state.view_mode(), SessionViewMode::Tree);
+        assert_eq!(state.visible_len(), 1);
         assert_eq!(state.visible_session(0).unwrap().id, "parent");
         assert_eq!(state.visible_depth(0), 0);
+        assert_eq!(state.visible_tree_prefix(0), "▸ ");
+
+        state.toggle_selected_expansion();
+
+        assert_eq!(state.visible_len(), 2);
+        assert_eq!(state.visible_tree_prefix(0), "▾ ");
         assert_eq!(state.visible_session(1).unwrap().id, "child");
         assert_eq!(state.visible_depth(1), 1);
+        assert_eq!(state.visible_tree_prefix(1), "└─ ● ");
+
+        state.toggle_selected_expansion();
+
+        assert_eq!(state.visible_len(), 1);
+        assert_eq!(state.visible_session(0).unwrap().id, "parent");
     }
 
     #[test]
@@ -564,15 +657,44 @@ mod tests {
             PathBuf::from("sessions"),
         );
         state.refresh_visible();
+        state.toggle_selected_expansion();
+        state.select_index(1);
+        state.toggle_selected_expansion();
 
         assert_eq!(state.visible_session(0).unwrap().id, "parent");
-        assert_eq!(state.visible_tree_prefix(0), "● ");
+        assert_eq!(state.visible_tree_prefix(0), "▾ ");
         assert_eq!(state.visible_session(1).unwrap().id, "first-child");
-        assert_eq!(state.visible_tree_prefix(1), "├─ ");
+        assert_eq!(state.visible_tree_prefix(1), "├─ ▾ ");
         assert_eq!(state.visible_session(2).unwrap().id, "grandchild");
-        assert_eq!(state.visible_tree_prefix(2), "│  └─ ");
+        assert_eq!(state.visible_tree_prefix(2), "│  └─ ● ");
         assert_eq!(state.visible_session(3).unwrap().id, "last-child");
-        assert_eq!(state.visible_tree_prefix(3), "└─ ");
+        assert_eq!(state.visible_tree_prefix(3), "└─ ● ");
+    }
+
+    #[test]
+    fn toggling_leaf_or_flat_session_does_not_change_visibility() {
+        let current_dir = PathBuf::from("/repo/current");
+        let mut state = SessionsState::new(
+            vec![test_session(
+                "session",
+                current_dir.clone(),
+                "alpha",
+                "summary",
+            )],
+            current_dir,
+            PathBuf::from("sessions"),
+        );
+        state.refresh_visible();
+
+        state.toggle_selected_expansion();
+        assert_eq!(state.visible_len(), 1);
+        assert!(state.expanded_session_ids.is_empty());
+
+        state.toggle_view_mode();
+        state.refresh_visible();
+        state.toggle_selected_expansion();
+        assert_eq!(state.visible_len(), 1);
+        assert!(state.expanded_session_ids.is_empty());
     }
 
     #[test]

@@ -94,7 +94,7 @@ pub(super) fn draw_footer(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect)
     let status = if app.status.is_empty() {
         match app.page {
             Page::Sessions => {
-                "Enter resume | i details | c conversation | r reload | v view | t toggle pages | Tab provider | a scope | / search | q quit"
+                "Enter resume | Space expand | i details | c conversation | r reload | v view | t pages | Tab provider | a scope | / search | q quit"
             }
             Page::Providers => {
                 "a apply | i details | t toggle pages | n new | e edit | d delete | q quit"

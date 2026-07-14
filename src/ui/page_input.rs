@@ -33,6 +33,10 @@ pub(super) fn handle_sessions_page_key(app: &mut App, key: KeyEvent) -> Option<A
             app.toggle_session_view_mode();
             None
         }
+        (KeyCode::Char(' '), KeyModifiers::NONE) => {
+            app.toggle_selected_session_expansion();
+            None
+        }
         (KeyCode::Char('/'), KeyModifiers::NONE) => {
             app.open_session_search();
             None

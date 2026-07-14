@@ -88,6 +88,10 @@ impl App {
         self.refresh_visible();
     }
 
+    pub(crate) fn toggle_selected_session_expansion(&mut self) {
+        self.session_state.toggle_selected_expansion();
+    }
+
     pub(crate) fn clear_session_search(&mut self) {
         self.session_state.clear_search();
         self.clear_status();

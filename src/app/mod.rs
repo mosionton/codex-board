@@ -222,6 +222,7 @@ mod tests {
             parent_thread_id: None,
             agent_nickname: None,
             agent_role: None,
+            agent_path: None,
             agent_depth: None,
         }
     }
@@ -281,6 +282,7 @@ mod tests {
                 parent_thread_id: None,
                 agent_nickname: None,
                 agent_role: None,
+                agent_path: None,
                 agent_depth: None,
             },
             Session {
@@ -296,6 +298,7 @@ mod tests {
                 parent_thread_id: None,
                 agent_nickname: None,
                 agent_role: None,
+                agent_path: None,
                 agent_depth: None,
             },
         ];

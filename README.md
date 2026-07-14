@@ -109,7 +109,7 @@ Claude Code 会话解析自 `~/.claude/projects` 下的 `.jsonl` 记录，跳过
 - 按 provider 过滤会话。
 - 在树形和平铺视图之间切换。
 - 搜索会话 id、agent、provider、工作目录、摘要、时间和 subagent 关系信息。
-- 查看会话详情，包括 parent、agent、role 和 depth。
+- 查看会话详情，包括 parent、agent、role、agent path 和 depth；兼容 Codex multi-agent v2 会话关系。
 - 打开会话对话。
 - 从会话原目录恢复。
 

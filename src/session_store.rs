@@ -62,6 +62,7 @@ pub(super) struct Session {
     pub(super) parent_thread_id: Option<String>,
     pub(super) agent_nickname: Option<String>,
     pub(super) agent_role: Option<String>,
+    pub(super) agent_path: Option<String>,
     pub(super) agent_depth: Option<u32>,
 }
 
@@ -130,7 +131,7 @@ fn parse_session_file(path: &Path) -> Result<Option<Session>> {
         };
 
         match json.get("type").and_then(JsonValue::as_str) {
-            Some("session_meta") => {
+            Some("session_meta") if parsed.id.is_none() => {
                 parsed
                     .apply_session_meta(payload, json.get("timestamp").and_then(JsonValue::as_str));
             }
@@ -166,6 +167,7 @@ struct ParsedSession {
     parent_thread_id: Option<String>,
     agent_nickname: Option<String>,
     agent_role: Option<String>,
+    agent_path: Option<String>,
     agent_depth: Option<u32>,
 }
 
@@ -194,11 +196,13 @@ impl ParsedSession {
         self.thread_source = payload
             .get("thread_source")
             .and_then(JsonValue::as_str)
-            .map(str::to_string);
+            .map(str::to_string)
+            .or_else(|| subagent_source(payload).map(|_| "subagent".to_string()));
         self.parent_thread_id = optional_string_from(
             payload.get("parent_thread_id"),
             spawn.and_then(|spawn| spawn.get("parent_thread_id")),
-        );
+        )
+        .or_else(|| optional_string(payload.get("forked_from_id")));
         self.agent_nickname = optional_string_from(
             payload.get("agent_nickname"),
             spawn
@@ -209,8 +213,13 @@ impl ParsedSession {
             payload.get("agent_role"),
             spawn.and_then(|spawn| spawn.get("agent_role")),
         );
-        self.agent_depth = spawn
-            .and_then(|spawn| spawn.get("depth"))
+        self.agent_path = optional_string_from(
+            payload.get("agent_path"),
+            spawn.and_then(|spawn| spawn.get("agent_path")),
+        );
+        self.agent_depth = payload
+            .get("agent_depth")
+            .or_else(|| spawn.and_then(|spawn| spawn.get("depth")))
             .and_then(JsonValue::as_u64)
             .and_then(|depth| u32::try_from(depth).ok());
     }
@@ -243,6 +252,7 @@ impl ParsedSession {
             parent_thread_id: self.parent_thread_id,
             agent_nickname: self.agent_nickname,
             agent_role: self.agent_role,
+            agent_path: self.agent_path,
             agent_depth: self.agent_depth,
         })
     }
@@ -268,6 +278,10 @@ fn optional_string_from(
         .and_then(JsonValue::as_str)
         .or_else(|| fallback.and_then(JsonValue::as_str))
         .map(str::to_string)
+}
+
+fn optional_string(value: Option<&JsonValue>) -> Option<String> {
+    value.and_then(JsonValue::as_str).map(str::to_string)
 }
 
 pub(super) fn load_session_conversation(
@@ -338,6 +352,7 @@ fn session_search_text(session: &Session) -> String {
         session.parent_thread_id.as_deref().unwrap_or_default(),
         session.agent_nickname.as_deref().unwrap_or_default(),
         session.agent_role.as_deref().unwrap_or_default(),
+        session.agent_path.as_deref().unwrap_or_default(),
     ]
     .join(" ")
     .to_lowercase()
@@ -536,6 +551,61 @@ mod tests {
     }
 
     #[test]
+    fn parses_multi_agent_v2_session_metadata() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            r#"{"timestamp":"2026-07-13T09:34:57Z","type":"session_meta","payload":{"session_id":"root","id":"child","forked_from_id":"root","timestamp":"2026-07-13T09:34:56Z","cwd":"/tmp/project","model_provider":"switcher","source":{"subagent":{"thread_spawn":{"depth":1,"agent_path":"/root/plan_integration","agent_nickname":"Hilbert","agent_role":null}}},"agent_nickname":"Hilbert","agent_path":"/root/plan_integration","multi_agent_version":"v2"}}"#
+                .to_string()
+                + "\n"
+                + r#"{"timestamp":"2026-07-13T09:34:57Z","type":"session_meta","payload":{"session_id":"root","id":"root","timestamp":"2026-07-13T09:30:00Z","cwd":"/tmp/project","model_provider":"switcher","source":"cli","thread_source":"user"}}"#,
+        )
+        .unwrap();
+
+        let session = parse_session_file(&path).unwrap().unwrap();
+
+        assert_eq!(session.id, "child");
+        assert_eq!(session.thread_source, "subagent");
+        assert_eq!(session.parent_thread_id.as_deref(), Some("root"));
+        assert_eq!(session.agent_nickname.as_deref(), Some("Hilbert"));
+        assert_eq!(session.agent_role, None);
+        assert_eq!(
+            session.agent_path.as_deref(),
+            Some("/root/plan_integration")
+        );
+        assert_eq!(session.agent_depth, Some(1));
+    }
+
+    #[test]
+    fn loads_multi_agent_v2_rollouts_as_distinct_related_sessions() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("root.jsonl"),
+            r#"{"timestamp":"2026-07-13T09:30:00Z","type":"session_meta","payload":{"session_id":"root","id":"root","timestamp":"2026-07-13T09:30:00Z","cwd":"/tmp/project","model_provider":"switcher","source":"cli","thread_source":"user"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("child.jsonl"),
+            r#"{"timestamp":"2026-07-13T09:34:57Z","type":"session_meta","payload":{"session_id":"root","id":"child","forked_from_id":"root","timestamp":"2026-07-13T09:34:56Z","cwd":"/tmp/project","model_provider":"switcher","source":{"subagent":{"thread_spawn":{"depth":1,"agent_path":"/root/review","agent_nickname":"Hilbert"}}},"agent_nickname":"Hilbert","agent_path":"/root/review","multi_agent_version":"v2"}}"#
+                .to_string()
+                + "\n"
+                + r#"{"timestamp":"2026-07-13T09:34:57Z","type":"session_meta","payload":{"session_id":"root","id":"root","timestamp":"2026-07-13T09:30:00Z","cwd":"/tmp/project","model_provider":"switcher","source":"cli","thread_source":"user"}}"#,
+        )
+        .unwrap();
+
+        let sessions = load_sessions(dir.path()).unwrap();
+
+        assert_eq!(sessions.len(), 2);
+        let child = sessions
+            .iter()
+            .find(|session| session.id == "child")
+            .unwrap();
+        assert_eq!(child.parent_thread_id.as_deref(), Some("root"));
+        assert!(sessions.iter().any(|session| session.id == "root"));
+    }
+
+    #[test]
     fn parses_subagent_name_from_string_source() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("session.jsonl");
@@ -606,6 +676,7 @@ mod tests {
             parent_thread_id: None,
             agent_nickname: None,
             agent_role: None,
+            agent_path: None,
             agent_depth: None,
         };
 
@@ -638,11 +709,13 @@ mod tests {
             parent_thread_id: Some("parent-123".into()),
             agent_nickname: Some("Boole".into()),
             agent_role: Some("worker".into()),
+            agent_path: Some("/root/review_security".into()),
             agent_depth: Some(1),
         };
 
         assert!(matches_search(&session, &search_terms("parent-123 boole")));
         assert!(matches_search(&session, &search_terms("subagent worker")));
+        assert!(matches_search(&session, &search_terms("review_security")));
     }
 
     #[test]

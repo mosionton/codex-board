@@ -174,6 +174,7 @@ mod tests {
             parent_thread_id: None,
             agent_nickname: None,
             agent_role: None,
+            agent_path: None,
             agent_depth: None,
         }
     }
@@ -502,6 +503,7 @@ mod tests {
         session.parent_thread_id = Some("parent-1".to_string());
         session.agent_nickname = Some("Boole".to_string());
         session.agent_role = Some("worker".to_string());
+        session.agent_path = Some("/root/review_security".to_string());
         session.agent_depth = Some(1);
         let sessions = vec![session];
         let mut registry = ProviderRegistry::default();
@@ -536,6 +538,8 @@ mod tests {
         assert!(session_detail_text.contains("Boole"));
         assert!(session_detail_text.contains("role"));
         assert!(session_detail_text.contains("worker"));
+        assert!(session_detail_text.contains("agent_path"));
+        assert!(session_detail_text.contains("/root/review_security"));
         assert!(session_detail_text.contains("depth"));
         assert!(session_detail_text.contains('1'));
         assert!(

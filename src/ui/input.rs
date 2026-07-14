@@ -652,6 +652,7 @@ mod tests {
             parent_thread_id: None,
             agent_nickname: None,
             agent_role: None,
+            agent_path: None,
             agent_depth: None,
         }
     }

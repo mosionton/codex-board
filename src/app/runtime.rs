@@ -60,7 +60,7 @@ pub fn run() -> Result<()> {
 
     match action {
         AppAction::Quit => Ok(()),
-        AppAction::Resume(session) => exec_session_resume(&session),
+        AppAction::Resume { session, options } => exec_session_resume(&session, options),
     }
 }
 
@@ -94,31 +94,44 @@ fn codex_home() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".codex"))
 }
 
-pub(super) fn exec_session_resume(session: &Session) -> Result<()> {
+pub(super) fn exec_session_resume(session: &Session, options: super::ResumeOptions) -> Result<()> {
     exec_resume_command(
         session.kind.resume_program(),
         session.kind.resume_args(),
         &session.id,
+        options.optional_args(session.kind),
         &session.cwd,
     )
 }
 
 #[cfg(test)]
 pub(super) fn exec_codex_resume(session_id: &str, cwd: &Path) -> Result<()> {
-    exec_resume_command("codex", &["resume"], session_id, cwd)
+    exec_resume_command("codex", &["resume"], session_id, &[], cwd)
 }
 
-fn exec_resume_command(program: &str, args: &[&str], session_id: &str, cwd: &Path) -> Result<()> {
+fn exec_resume_command(
+    program: &str,
+    args: &[&str],
+    session_id: &str,
+    optional_args: &[&str],
+    cwd: &Path,
+) -> Result<()> {
     ensure_session_cwd_exists(cwd)?;
 
     let status = Command::new(program)
         .current_dir(cwd)
         .args(args)
         .arg(session_id)
+        .args(optional_args)
         .status()
         .with_context(|| {
+            let optional_args = if optional_args.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", optional_args.join(" "))
+            };
             format!(
-                "failed to start `{program} {} {session_id}` in {}",
+                "failed to start `{program} {} {session_id}{optional_args}` in {}",
                 args.join(" "),
                 cwd.display()
             )

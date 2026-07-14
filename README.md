@@ -89,7 +89,7 @@ Claude Code 会话不需要切换 provider，直接选中按 `Enter` 恢复。
 恢复前会检查会话原工作目录是否存在。通过检查后按会话类型执行：
 
 ```sh
-codex resume <session_id>    # Codex 会话
+codex resume <session_id> [--yolo] # Codex 会话；确认框按 Space 切换可选参数
 claude --resume <session_id> # Claude Code 会话
 ```
 

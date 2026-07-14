@@ -2,7 +2,7 @@ use std::{path::Path, time::Duration};
 
 use crate::session_store::{Session, load_all_sessions};
 
-use super::{App, ConfirmationAction, Overlay, ensure_session_cwd_exists};
+use super::{App, ConfirmationAction, Overlay, ResumeOptions, ensure_session_cwd_exists};
 
 impl App {
     pub(crate) fn refresh_visible(&mut self) {
@@ -64,7 +64,10 @@ impl App {
             self.show_error(format!("Cannot resume session: {err}"));
             return;
         }
-        self.confirmation = Some(ConfirmationAction::ResumeSession(Box::new(session)));
+        self.confirmation = Some(ConfirmationAction::ResumeSession {
+            session: Box::new(session),
+            options: ResumeOptions::default(),
+        });
         self.overlay = Some(Overlay::Confirmation);
         self.clear_status();
     }

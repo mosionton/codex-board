@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::app::{App, Page, Scope, SessionViewMode};
 
-use super::layout::centered_rect;
+use super::layout::{centered_rect, centered_rect_size, percent_len, wrap_text};
 
 pub(super) fn draw_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     if app.page == Page::Providers {
@@ -168,16 +168,28 @@ pub(super) fn draw_confirmation_dialog(frame: &mut ratatui::Frame<'_>, app: &App
         return;
     };
 
-    let popup = centered_rect(58, 22, area);
+    let help = app.confirmation_help();
+    let popup_width = percent_len(area.width, 58)
+        .max(area.width.min(36))
+        .min(area.width);
+    let inner_width = usize::from(popup_width.saturating_sub(2));
+    let content_height = message
+        .lines()
+        .map(|line| wrap_text(line, inner_width).len())
+        .sum::<usize>()
+        .saturating_add(1)
+        .saturating_add(wrap_text(help, inner_width).len());
+    let popup_height = u16::try_from(content_height)
+        .unwrap_or(u16::MAX)
+        .saturating_add(2)
+        .max(7);
+    let popup = centered_rect_size(popup_width, popup_height, area);
     let mut lines = message
         .lines()
         .map(|line| Line::raw(line.to_string()))
         .collect::<Vec<_>>();
     lines.push(Line::raw(""));
-    lines.push(Line::styled(
-        "Enter/y confirms. Esc/n cancels.",
-        Style::default().fg(Color::Gray),
-    ));
+    lines.push(Line::styled(help, Style::default().fg(Color::Gray)));
     frame.render_widget(Clear, popup);
     frame.render_widget(
         Paragraph::new(lines)

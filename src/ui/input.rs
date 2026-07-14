@@ -71,7 +71,7 @@ mod tests {
     use crate::{
         app::{
             ConfirmationAction, ConversationRoleFilter, Overlay, ProviderEditor, ProviderField,
-            SessionViewMode,
+            ResumeOptions, SessionViewMode,
         },
         provider_config::{
             DEFAULT_AUTO_COMPACT_PERCENT, ModelCatalog, ProviderAuthMode, ProviderConfig,
@@ -549,20 +549,27 @@ mod tests {
         let session_dir = dir.path().join("project");
         std::fs::create_dir(&session_dir).unwrap();
         let mut app = app_with_registry(ProviderRegistry::default());
-        app.confirmation = Some(ConfirmationAction::ResumeSession(Box::new(test_session(
-            "session-1",
-            session_dir,
-            "resume request",
-        ))));
+        app.confirmation = Some(ConfirmationAction::ResumeSession {
+            session: Box::new(test_session("session-1", session_dir, "resume request")),
+            options: ResumeOptions::default(),
+        });
         app.overlay = Some(Overlay::Confirmation);
 
         handle_confirmation_key(
             &mut app,
-            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
         );
+        let (_, message) = app.confirmation_dialog().unwrap();
+        assert!(message.contains("codex resume session-1 --yolo"));
+        assert!(message.contains("[x] --yolo"));
+
+        handle_confirmation_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         match app.take_queued_action() {
-            Some(AppAction::Resume(session)) => assert_eq!(session.id, "session-1"),
+            Some(AppAction::Resume { session, options }) => {
+                assert_eq!(session.id, "session-1");
+                assert!(options.yolo);
+            }
             _ => panic!("expected queued resume action"),
         }
         assert_eq!(app.overlay, None);

@@ -38,12 +38,13 @@ impl SessionKind {
         }
     }
 
-    pub(super) fn resume_command_display(self, session_id: &str) -> String {
-        format!(
-            "{} {} {session_id}",
-            self.resume_program(),
-            self.resume_args().join(" ")
-        )
+    pub(super) fn resume_command_display(self, session_id: &str, optional_args: &[&str]) -> String {
+        std::iter::once(self.resume_program())
+            .chain(self.resume_args().iter().copied())
+            .chain(std::iter::once(session_id))
+            .chain(optional_args.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 

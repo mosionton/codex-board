@@ -408,7 +408,7 @@ pub(super) fn editor_credentials(
     }
 }
 
-fn default_wire_api() -> &'static str {
+const fn default_wire_api() -> &'static str {
     WIRE_API_OPTIONS[0]
 }
 

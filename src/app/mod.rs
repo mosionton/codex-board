@@ -84,8 +84,29 @@ pub(crate) struct App {
 }
 
 pub(crate) enum AppAction {
-    Resume(Box<Session>),
+    Resume {
+        session: Box<Session>,
+        options: ResumeOptions,
+    },
     Quit,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ResumeOptions {
+    pub(crate) yolo: bool,
+}
+
+impl ResumeOptions {
+    pub(crate) const fn optional_args(
+        self,
+        kind: crate::session_store::SessionKind,
+    ) -> &'static [&'static str] {
+        if self.yolo && matches!(kind, crate::session_store::SessionKind::Codex) {
+            &["--yolo"]
+        } else {
+            &[]
+        }
+    }
 }
 
 impl App {
@@ -201,6 +222,7 @@ mod tests {
             parent_thread_id: None,
             agent_nickname: None,
             agent_role: None,
+            agent_path: None,
             agent_depth: None,
         }
     }
@@ -260,6 +282,7 @@ mod tests {
                 parent_thread_id: None,
                 agent_nickname: None,
                 agent_role: None,
+                agent_path: None,
                 agent_depth: None,
             },
             Session {
@@ -275,6 +298,7 @@ mod tests {
                 parent_thread_id: None,
                 agent_nickname: None,
                 agent_role: None,
+                agent_path: None,
                 agent_depth: None,
             },
         ];
@@ -402,6 +426,13 @@ mod tests {
         app.prompt_resume_selected_session();
         let (_, message) = app.confirmation_dialog().unwrap();
         assert!(message.contains("codex resume codex-1"));
+        assert!(!message.contains("codex resume codex-1 --yolo"));
+        assert!(message.contains("[ ] --yolo"));
+
+        app.toggle_resume_optional_argument();
+        let (_, message) = app.confirmation_dialog().unwrap();
+        assert!(message.contains("codex resume codex-1 --yolo"));
+        assert!(message.contains("[x] --yolo"));
 
         app.close_overlay();
         app.move_selection(1);
@@ -409,6 +440,22 @@ mod tests {
         let (_, message) = app.confirmation_dialog().unwrap();
         assert!(message.contains("claude --resume claude-1"));
         assert!(message.contains("project"));
+        assert!(!message.contains("--yolo"));
+    }
+
+    #[test]
+    fn resume_options_only_apply_yolo_to_codex() {
+        let options = ResumeOptions { yolo: true };
+
+        assert_eq!(
+            options.optional_args(crate::session_store::SessionKind::Codex),
+            ["--yolo"]
+        );
+        assert!(
+            options
+                .optional_args(crate::session_store::SessionKind::Claude)
+                .is_empty()
+        );
     }
 
     #[test]

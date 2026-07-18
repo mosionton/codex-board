@@ -89,7 +89,7 @@ Claude Code 会话不需要切换 provider，直接选中按 `Enter` 恢复。
 恢复前会检查会话原工作目录是否存在。通过检查后按会话类型执行：
 
 ```sh
-codex resume <session_id>    # Codex 会话
+codex resume <session_id> [--yolo] # Codex 会话；确认框按 Space 切换可选参数
 claude --resume <session_id> # Claude Code 会话
 ```
 
@@ -97,8 +97,9 @@ claude --resume <session_id> # Claude Code 会话
 
 ### 会话按 provider 和关系展示
 
-Sessions 页面显示当前目录或全部本地会话，同时包含 Codex 和 Claude Code 两种来源。默认按父子关系树形展示会话；`source` 列会用
-`●`、`├─`、`└─` 和 `│` 显示父子层级。表格包含时间、agent（`codex` / `claude`）、provider、来源、工作目录和摘要。
+Sessions 页面显示当前目录或全部本地会话，同时包含 Codex 和 Claude Code 两种来源。默认按父子关系树形展示并折叠会话；`source` 列会用
+`▸`、`▾`、`●`、`├─`、`└─` 和 `│` 显示展开状态与父子层级。选中有子会话的节点后按 `Space` 展开或折叠。
+表格包含时间、agent（`codex` / `claude`）、provider、来源、工作目录和摘要。
 
 Claude Code 会话解析自 `~/.claude/projects` 下的 `.jsonl` 记录，跳过 subagent 侧链记录；
 对话查看、搜索、详情和恢复（`claude --resume`）与 Codex 会话一致。
@@ -108,8 +109,9 @@ Claude Code 会话解析自 `~/.claude/projects` 下的 `.jsonl` 记录，跳过
 - 当前目录和全部会话范围切换，当前目录范围会识别软连接等价路径。
 - 按 provider 过滤会话。
 - 在树形和平铺视图之间切换。
+- 展开或折叠树形会话，初始状态默认折叠。
 - 搜索会话 id、agent、provider、工作目录、摘要、时间和 subagent 关系信息。
-- 查看会话详情，包括 parent、agent、role 和 depth。
+- 查看会话详情，包括 parent、agent、role、agent path 和 depth；兼容 Codex multi-agent v2 会话关系。
 - 打开会话对话。
 - 从会话原目录恢复。
 
@@ -163,6 +165,7 @@ Conversation 窗口用于恢复前检查会话内容。
 | `i` | 查看详情 |
 | `r` | 重新加载 |
 | `v` | 切换树形/平铺视图 |
+| `Space` | 展开/折叠选中的树形会话 |
 | `Enter` | 恢复会话 |
 | `t` | 切到 Providers |
 | `q` / `Esc` | 退出，或清除搜索 |

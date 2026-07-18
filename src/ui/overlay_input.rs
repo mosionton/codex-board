@@ -70,6 +70,7 @@ pub(super) fn handle_conversation_search_key(app: &mut App, key: KeyEvent) {
 
 pub(super) fn handle_confirmation_key(app: &mut App, key: KeyEvent) {
     match (key.code, key.modifiers) {
+        (KeyCode::Char(' '), KeyModifiers::NONE) => app.toggle_resume_optional_argument(),
         (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::NONE) => {
             app.confirm_pending_action();
         }

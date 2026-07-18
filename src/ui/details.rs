@@ -85,6 +85,13 @@ pub(super) fn selected_session_details(app: &App, width: usize) -> Vec<Line<'sta
                     .unwrap_or_else(|| "-".to_string()),
             ),
             (
+                "agent_path",
+                session
+                    .agent_path
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            ),
+            (
                 "depth",
                 session
                     .agent_depth

@@ -87,6 +87,7 @@ pub(crate) enum AppAction {
     Resume {
         session: Box<Session>,
         options: ResumeOptions,
+        local_provider: String,
     },
     Quit,
 }
@@ -422,16 +423,27 @@ mod tests {
             session_dir,
             PathBuf::from("sessions"),
         );
+        app.providers.applied_provider_id = Some("test-active-provider".into());
 
         app.prompt_resume_selected_session();
         let (_, message) = app.confirmation_dialog().unwrap();
-        assert!(message.contains("codex resume codex-1"));
-        assert!(!message.contains("codex resume codex-1 --yolo"));
+        assert!(
+            message.contains("codex resume --oss --local-provider test-active-provider codex-1")
+        );
+        assert!(
+            !message.contains(
+                "codex resume --oss --local-provider test-active-provider codex-1 --yolo"
+            )
+        );
         assert!(message.contains("[ ] --yolo"));
 
         app.toggle_resume_optional_argument();
         let (_, message) = app.confirmation_dialog().unwrap();
-        assert!(message.contains("codex resume codex-1 --yolo"));
+        assert!(
+            message.contains(
+                "codex resume --oss --local-provider test-active-provider codex-1 --yolo"
+            )
+        );
         assert!(message.contains("[x] --yolo"));
 
         app.close_overlay();
@@ -468,6 +480,7 @@ mod tests {
             session_dir.clone(),
             dir.path().join("sessions"),
         );
+        app.providers.applied_provider_id = Some("test-active-provider".into());
 
         app.prompt_resume_selected_session();
         std::fs::remove_dir(&session_dir).unwrap();

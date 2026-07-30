@@ -64,9 +64,25 @@ impl App {
             self.show_error(format!("Cannot resume session: {err}"));
             return;
         }
+        let local_provider = if matches!(session.kind, crate::session_store::SessionKind::Codex) {
+            let Some(provider) = self
+                .providers
+                .applied_provider_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|provider| !provider.is_empty())
+            else {
+                self.show_error("No provider is currently applied to Codex.");
+                return;
+            };
+            provider.to_string()
+        } else {
+            String::new()
+        };
         self.confirmation = Some(ConfirmationAction::ResumeSession {
             session: Box::new(session),
             options: ResumeOptions::default(),
+            local_provider,
         });
         self.overlay = Some(Overlay::Confirmation);
         self.clear_status();

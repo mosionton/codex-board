@@ -552,6 +552,7 @@ mod tests {
         app.confirmation = Some(ConfirmationAction::ResumeSession {
             session: Box::new(test_session("session-1", session_dir, "resume request")),
             options: ResumeOptions::default(),
+            local_provider: "test-active-provider".to_string(),
         });
         app.overlay = Some(Overlay::Confirmation);
 
@@ -560,15 +561,24 @@ mod tests {
             KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
         );
         let (_, message) = app.confirmation_dialog().unwrap();
-        assert!(message.contains("codex resume session-1 --yolo"));
+        assert!(
+            message.contains(
+                "codex resume --oss --local-provider test-active-provider session-1 --yolo"
+            )
+        );
         assert!(message.contains("[x] --yolo"));
 
         handle_confirmation_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         match app.take_queued_action() {
-            Some(AppAction::Resume { session, options }) => {
+            Some(AppAction::Resume {
+                session,
+                options,
+                local_provider,
+            }) => {
                 assert_eq!(session.id, "session-1");
                 assert!(options.yolo);
+                assert_eq!(local_provider, "test-active-provider");
             }
             _ => panic!("expected queued resume action"),
         }

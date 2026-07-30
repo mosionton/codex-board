@@ -31,16 +31,21 @@ impl SessionKind {
         }
     }
 
-    pub(super) const fn resume_args(self) -> &'static [&'static str] {
+    pub(super) fn resume_args(self, local_provider: &str) -> Vec<&str> {
         match self {
-            Self::Codex => &["resume"],
-            Self::Claude => &["--resume"],
+            Self::Codex => vec!["resume", "--oss", "--local-provider", local_provider],
+            Self::Claude => vec!["--resume"],
         }
     }
 
-    pub(super) fn resume_command_display(self, session_id: &str, optional_args: &[&str]) -> String {
+    pub(super) fn resume_command_display(
+        self,
+        session_id: &str,
+        local_provider: &str,
+        optional_args: &[&str],
+    ) -> String {
         std::iter::once(self.resume_program())
-            .chain(self.resume_args().iter().copied())
+            .chain(self.resume_args(local_provider))
             .chain(std::iter::once(session_id))
             .chain(optional_args.iter().copied())
             .collect::<Vec<_>>()
@@ -482,6 +487,18 @@ pub(super) fn truncate_chars(text: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn codex_resume_command_uses_supplied_local_provider() {
+        assert_eq!(
+            SessionKind::Codex.resume_command_display(
+                "session-1",
+                "test-local-provider",
+                &["--yolo"]
+            ),
+            "codex resume --oss --local-provider test-local-provider session-1 --yolo"
+        );
+    }
 
     #[test]
     fn parses_session_metadata_and_turn_context() {

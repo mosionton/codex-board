@@ -60,7 +60,11 @@ pub fn run() -> Result<()> {
 
     match action {
         AppAction::Quit => Ok(()),
-        AppAction::Resume { session, options } => exec_session_resume(&session, options),
+        AppAction::Resume {
+            session,
+            options,
+            local_provider,
+        } => exec_session_resume(&session, options, &local_provider),
     }
 }
 
@@ -94,10 +98,15 @@ fn codex_home() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".codex"))
 }
 
-pub(super) fn exec_session_resume(session: &Session, options: super::ResumeOptions) -> Result<()> {
+pub(super) fn exec_session_resume(
+    session: &Session,
+    options: super::ResumeOptions,
+    local_provider: &str,
+) -> Result<()> {
+    let resume_args = session.kind.resume_args(local_provider);
     exec_resume_command(
         session.kind.resume_program(),
-        session.kind.resume_args(),
+        &resume_args,
         &session.id,
         options.optional_args(session.kind),
         &session.cwd,
@@ -106,7 +115,13 @@ pub(super) fn exec_session_resume(session: &Session, options: super::ResumeOptio
 
 #[cfg(test)]
 pub(super) fn exec_codex_resume(session_id: &str, cwd: &Path) -> Result<()> {
-    exec_resume_command("codex", &["resume"], session_id, &[], cwd)
+    exec_resume_command(
+        "codex",
+        &["resume", "--oss", "--local-provider", "test-local-provider"],
+        session_id,
+        &[],
+        cwd,
+    )
 }
 
 fn exec_resume_command(

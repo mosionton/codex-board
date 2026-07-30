@@ -9,6 +9,7 @@ pub enum ConfirmationAction {
     ResumeSession {
         session: Box<Session>,
         options: ResumeOptions,
+        local_provider: String,
     },
     SaveProvider(String),
 }
@@ -28,12 +29,20 @@ impl App {
                 self.overlay = None;
                 self.delete_provider(&id);
             }
-            ConfirmationAction::ResumeSession { session, options } => {
+            ConfirmationAction::ResumeSession {
+                session,
+                options,
+                local_provider,
+            } => {
                 self.overlay = None;
                 if let Err(err) = ensure_session_cwd_exists(&session.cwd) {
                     self.show_error(format!("Cannot resume session: {err}"));
                 } else {
-                    self.queued_action = Some(AppAction::Resume { session, options });
+                    self.queued_action = Some(AppAction::Resume {
+                        session,
+                        options,
+                        local_provider,
+                    });
                 }
             }
             ConfirmationAction::SaveProvider(_) => self.save_provider_editor(),
@@ -70,15 +79,21 @@ impl App {
             ConfirmationAction::DeleteProvider(id) => {
                 Some(("Delete Provider", format!("Delete provider '{id}'?")))
             }
-            ConfirmationAction::ResumeSession { session, options } => {
+            ConfirmationAction::ResumeSession {
+                session,
+                options,
+                local_provider,
+            } => {
                 let label = if session.summary.trim().is_empty() {
                     session.id.clone()
                 } else {
                     truncate_chars(&session.summary, 72)
                 };
-                let command = session
-                    .kind
-                    .resume_command_display(&session.id, options.optional_args(session.kind));
+                let command = session.kind.resume_command_display(
+                    &session.id,
+                    local_provider,
+                    options.optional_args(session.kind),
+                );
                 let optional_args =
                     if matches!(session.kind, crate::session_store::SessionKind::Codex) {
                         format!(
@@ -103,8 +118,9 @@ impl App {
     }
 
     pub(crate) fn toggle_resume_optional_argument(&mut self) {
-        if let Some(ConfirmationAction::ResumeSession { session, options }) =
-            self.confirmation.as_mut()
+        if let Some(ConfirmationAction::ResumeSession {
+            session, options, ..
+        }) = self.confirmation.as_mut()
             && matches!(session.kind, crate::session_store::SessionKind::Codex)
         {
             options.yolo = !options.yolo;
